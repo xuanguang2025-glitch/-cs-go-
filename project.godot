@@ -1,0 +1,79 @@
+; Engine configuration file.
+; PROJECT STRIKE - 5v5 战术竞技第一人称射击游戏
+; 引擎: Godot 4.4.1 stable (Forward Plus) + GodotSteam v4.16 (Steamworks 1.62)
+
+config_version=5
+
+[application]
+
+config/name="PROJECT STRIKE"
+config/description="Original 5v5 tactical competitive FPS. All assets procedural / original."
+run/main_scene="res://scenes/Main.tscn"
+config/features=PackedStringArray("4.4", "Forward Plus")
+config/icon="res://icon/game.ico"
+config/quit_on_go_back=false
+
+[autoload]
+
+GameConfig="*res://scripts/Data/GameConfig.gd"
+EventBus="*res://scripts/Core/EventBus.gd"
+AudioForge="*res://scripts/Audio/AudioForge.gd"
+WeaponDatabase="*res://scripts/Data/WeaponDatabase.gd"
+GameManager="*res://scripts/Core/GameManager.gd"
+RankSystem="*res://scripts/Core/RankSystem.gd"
+ReplaySystem="*res://scripts/Core/ReplaySystem.gd"
+SteamManager="*res://scripts/Core/SteamManager.gd"
+NetworkManager="*res://scripts/Core/NetworkManager.gd"
+
+[display]
+
+window/size/viewport_width=1920
+window/size/viewport_height=1080
+window/size/window_width_override=1600
+window/size/window_height_override=900
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+window/vsync/vsync_mode=1
+
+[physics]
+
+common/physics_ticks_per_second=128
+common/physics_interpolation=false
+3d/default_gravity=18.0
+3d/default_linear_damp=0.0
+3d/default_angular_damp=0.1
+
+[layer_names]
+
+3d_physics/layer_1="World"
+3d_physics/layer_2="PlayerBody"
+3d_physics/layer_3="Hitbox"
+3d_physics/layer_4="Grenade"
+3d_physics/layer_5="Debris"
+3d_physics/layer_6="Smoke"
+
+[rendering]
+
+renderer/rendering_method="forward_plus"
+renderer/rendering_method.mobile="mobile"
+textures/vram_compression/import_etc2_astc=false
+anti_aliasing/quality/msaa_3d=1
+anti_aliasing/quality/screen_space_aa=1
+anti_aliasing/quality/use_debanding=true
+textures/canvas_textures/default_texture_filter=0
+environment/defaults/default_clear_color=Color(0.05, 0.06, 0.08, 1)
+lights_and_shadows/directional_shadow/soft_shadow_filter_quality=2
+textures/default_filters/anisotropic_filtering_level=8
+world/occlusion_culling/build_quality=2
+
+[debug]
+
+gdscript/warnings/untyped_declaration=0
+gdscript/warnings/integer_division=0
+
+[input]
+
+ui_accept={
+"deadzone": 0.5,
+"events": []
+}
