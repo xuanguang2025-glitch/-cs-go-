@@ -4,7 +4,27 @@ extends Node
 ##
 ## 用法:
 ##   Godot441_console.exe --headless res://scenes/Dev/BombTraceProbe.tscn \
-##       -- --map project_zero --rounds 2 [--aionly]
+##       -- --map project_zero --rounds 2 [--aionly] \
+##          [--difficulty <0|1|2>] [--max-seconds <秒>]
+##
+## --difficulty <N>: Bot 难度档, 0=简单 / 1=普通 / 2=困难。超出范围会被
+##                   自动夹到 0..2(传 9 等价于 2), 不会崩。不传则沿用
+##                   GameManager.bot_difficulty 的默认值 1(普通)。
+##                   ⚠ 时序: 该字段必须在 Game.tscn 被加载【之前】写进
+##                   GameManager —— MatchManager._make_bot() 是在生成 Bot 时
+##                   才去读它(MatchManager.gd:451)。本探针的参数解析就放在
+##                   load("res://scenes/Game.tscn") 之前, 不要往下挪。
+## --max-seconds <F>: 墙钟超时上限, 默认 900 秒(原 const MAX_SECONDS)。低于
+##                   1 秒会被夹到 1 秒。简单难度回合普遍更长, 12 回合长跑很容易
+##                   撞上 900s 就被截断、样本作废, 此时必须显式调大。
+##
+## 三档难度基线(必须同口径对比) 示例:
+##   简单 0: ... --map project_zero --rounds 12 --aionly --difficulty 0 --max-seconds 2400
+##   普通 1: ... --map project_zero --rounds 12 --aionly --difficulty 1 --max-seconds 1800
+##   困难 2: ... --map project_zero --rounds 12 --aionly --difficulty 2 --max-seconds 1800
+##
+## ⚠ 运行前必须显式设置 APPDATA 指向真实用户目录, 否则 Godot 会退回项目内
+##   的 ./Godot 相对数据目录, 在仓库里写出 190MB+ 的引擎数据。
 ##
 ## --aionly: 走 dedicated_server 路径启动 —— 只有 10 个 Bot(5v5), 没有本地玩家、
 ##           没有 HUD。这是唯一能拿到"纯净 AI 对局"的方式: 本地玩家若在场,
@@ -26,6 +46,7 @@ const SAMPLE_INTERVAL := 0.1
 ## 如果是缓慢此消彼长, 说明是逐个击破。
 const REPORT_EVERY := 256
 const MAX_SECONDS := 900.0
+var _max_seconds: float = MAX_SECONDS   # 可被 --max-seconds 覆盖(默认仍 900s)
 
 var mm: Node = null
 var game_root: Node = null
@@ -84,6 +105,13 @@ func _ready() -> void:
 			_target_rounds = int(uargs[i + 1])
 		elif uargs[i] == "--aionly":
 			_ai_only = true
+		elif uargs[i] == "--difficulty" and i + 1 < uargs.size():
+			# 必须在这里就写入 GameManager: MatchManager._make_bot() 在 Bot
+			# 生成时才读这个字段(MatchManager.gd:451), 而 Bot 是在 Game.tscn
+			# 加载之后才生成的。所以参数解析必须留在 load() 之前, 不要下移。
+			GameManager.bot_difficulty = clampi(int(uargs[i + 1]), 0, 2)
+		elif uargs[i] == "--max-seconds" and i + 1 < uargs.size():
+			_max_seconds = maxf(float(uargs[i + 1]), 1.0)
 
 	# 纯 AI 对局: 走专用服务器分支(无本地玩家 / 无 UI)
 	if _ai_only:
@@ -117,6 +145,8 @@ func _ready() -> void:
 	print("地图     : %s" % _map_id)
 	print("角色总数 : %d  |  Bot: %d  |  难度档: %d" % [
 		mm.actors.size(), mm.bot_controllers.size(), GameManager.bot_difficulty])
+	# 把实际生效的运行参数打出来, 避免"以为传了参数但其实没生效"这类静默失败
+	print("回合上限 : %d  |  超时上限: %.0f 秒" % [_target_rounds, _max_seconds])
 	print("炸弹点   : %d" % mm.sites.size())
 
 	EventBus.bomb_planted.connect(func(_s, _p): _plants += 1; _round_plants += 1)
@@ -182,7 +212,7 @@ func _process(delta: float) -> void:
 	if _frames % REPORT_EVERY == 0:
 		_live_report()
 
-	if mm.round_number > _target_rounds or elapsed > MAX_SECONDS:
+	if mm.round_number > _target_rounds or elapsed > _max_seconds:
 		_finish()
 
 
