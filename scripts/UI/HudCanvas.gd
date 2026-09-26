@@ -20,7 +20,16 @@ var hitmarker_timer: float = 0.0
 var hitmarker_kill: bool = false
 var hitmarker_hs: bool = false
 
-var crosshair_gap: float = 4.0
+## 准星四段的中心留白(像素)。
+##   CROSSHAIR_GAP_AUTO(-1) = 自动: 按当前真实扩散锥在屏幕上的投影半径绘制,
+##                            即"准星张开多少 = 子弹可能偏多少"(G1 修复的核心)。
+##   >= 0                   = 显式覆盖值, 保留给外部/调试使用。
+const CROSSHAIR_GAP_AUTO := -1.0
+const CROSSHAIR_GAP_STATIC := 4.0     # crosshair_dynamic = false 时的固定留白
+const CROSSHAIR_GAP_MIN := 3.0        # 自动模式下的下限, 避免散布极小时准星糊成一团
+const CROSSHAIR_GAP_MAX_RATIO := 0.30 # 自动模式下上限 = 屏幕短边 * 该系数, 防止飞出屏幕
+
+var crosshair_gap: float = CROSSHAIR_GAP_AUTO
 var crosshair_len: float = 7.0
 var crosshair_thickness: float = 1.6
 var crosshair_dot: bool = false
@@ -110,6 +119,7 @@ func _process(delta: float) -> void:
 
 
 func _draw() -> void:
+	_draw_objective_markers()
 	_draw_crosshair()
 	_draw_damage_numbers()
 	_draw_friendly_warning()
@@ -119,18 +129,68 @@ func _draw() -> void:
 
 
 # ---------------------------------------------------------------- 准星
+
+## 把一个"半角 spread_deg 的圆锥"投影到屏幕上, 返回它距离屏幕中心的**像素半径**。
+##
+## 这是 G1 的关键: 旧的准星留白是 `3.0 + spread * 1.35` 的经验像素映射, 与相机
+## 视场角无关, 在 105° 视场下把真实散布**低估了约 3 倍**(ar17 腰射 3.4° 实测应为
+## 约 24.6px, 旧公式只给 7.6px)。玩家看到"准星很小、准心压在目标身上", 实际子弹
+## 落在一个半径 1.19m(@20m) 的圆里 —— 这就是"瞄得准打不中"的直接观感来源。
+##
+## 投影关系(透视相机): 屏幕半宽对应 tan(hfov/2), 角 θ 对应 tan(θ), 故
+##   r_px = (view.x / 2) * tan(θ) / tan(hfov / 2)
+## Godot 的 Camera3D.fov 是**垂直**视场角(keep_aspect = KEEP_HEIGHT 时),
+## 水平视场角需要按宽高比换算: hfov = 2 * atan(tan(fov_v/2) * view.x / view.y)。
+##
+## 抽成 static 是为了让无头环境也能断言(不依赖任何渲染输出)。
+static func cone_radius_px(spread_deg: float, view: Vector2, fov_v_deg: float) -> float:
+	if view.x <= 0.0 or view.y <= 0.0:
+		return 0.0
+	var fov_v: float = clampf(fov_v_deg, 0.5, 179.0)
+	var half_v_tan: float = tan(deg_to_rad(fov_v * 0.5))
+	var half_h_tan: float = half_v_tan * (view.x / view.y)
+	if half_h_tan <= 0.000001:
+		return 0.0
+	var spread: float = maxf(spread_deg, 0.0)
+	if spread >= 89.0:
+		spread = 89.0
+	return (view.x * 0.5) * (tan(deg_to_rad(spread)) / half_h_tan)
+
+
+## 当前应该用的准星留白(像素)。
+##   crosshair_dynamic = false -> 固定 CROSSHAIR_GAP_STATIC(即"静态准星"选项)
+##   crosshair_gap >= 0        -> 显式覆盖值
+##   否则                      -> 按当前真实扩散与当前相机视场角忠实投影
+func _crosshair_gap_px() -> float:
+	if not crosshair_dynamic:
+		return CROSSHAIR_GAP_STATIC
+	if crosshair_gap >= 0.0:
+		return crosshair_gap
+	if actor == null or actor.weapon_system == null:
+		return CROSSHAIR_GAP_MIN
+	var spread: float = float(actor.weapon_system.call("get_current_spread"))
+	var fov_v: float = 90.0
+	var cam := actor.get_camera()
+	if cam != null:
+		fov_v = cam.fov          # 开镜/倍镜时 FOV 会收窄, 留白随之等比缩小
+	var r: float = cone_radius_px(spread, size, fov_v)
+	var cap: float = minf(size.x, size.y) * CROSSHAIR_GAP_MAX_RATIO
+	return clampf(r, CROSSHAIR_GAP_MIN, maxf(cap, CROSSHAIR_GAP_MIN))
+
+
 func _draw_crosshair() -> void:
 	if actor == null or not actor.alive:
 		return
 	if actor.weapon_system != null and actor.weapon_system.call("is_aiming"):
 		var kind: String = str(WeaponDatabase.get_weapon(
 			actor.weapon_system.current_id).get("viewmodel", ""))
-		if kind == "sniper":
+		# 狙击镜: 按 viewmodel 判定; 另外任何声明了 scope_zoom 的武器同样走镜内视图
+		if kind == "sniper" or bool(actor.weapon_system.call("has_scope")):
 			_draw_scope()
 			return
 
 	var center := size * 0.5
-	var gap: float = crosshair_gap if crosshair_dynamic else 4.0
+	var gap: float = _crosshair_gap_px()
 	var length: float = crosshair_len * crosshair_scale
 	var w: float = crosshair_thickness * crosshair_scale
 	var color_text: String = str(GameManager.get_setting("crosshair_color", "#26ff80"))
@@ -216,28 +276,67 @@ func _draw_friendly_warning() -> void:
 		HORIZONTAL_ALIGNMENT_CENTER, 120, 17, col)
 
 
+## 圆形镜筒遮罩的内/外圈采样点。返回 [内圈(PackedVector2Array), 外圈(PackedVector2Array)]。
+##   内圈: 以 center 为心、半径 r 的圆
+##   外圈: 从 center 沿同一方向射出、打到 view 矩形边界的点
+## 两者之间用四边形环带填充即可精确挖出一个圆孔。抽成静态方法是为了让
+## 无头环境(没有渲染输出)也能直接断言几何正确性, 不必依赖截图。
+static func build_scope_ring(center: Vector2, r: float, view: Vector2,
+		seg: int = 72) -> Array:
+	var inner := PackedVector2Array()
+	var outer := PackedVector2Array()
+	inner.resize(seg)
+	outer.resize(seg)
+	var half: Vector2 = view * 0.5
+	for i in seg:
+		var ang: float = TAU * float(i) / float(seg)
+		var d := Vector2(cos(ang), sin(ang))
+		inner[i] = center + d * r
+		var t: float = 1.0e9
+		if absf(d.x) > 0.0001:
+			t = minf(t, half.x / absf(d.x))
+		if absf(d.y) > 0.0001:
+			t = minf(t, half.y / absf(d.y))
+		outer[i] = center + d * t
+	return [inner, outer]
+
+
 func _draw_scope() -> void:
 	var center := size * 0.5
-	# 狙击镜: 黑色遮罩 + 十字线 + 密位刻度
+	# 狙击镜: 圆形黑色遮罩 + 十字分划 + 密位刻度 + 倍率读数。
+	# 全部由 _draw() 程序化绘制(rect / line / arc / polygon), 不依赖任何贴图资源。
 	var mask := Color(0, 0, 0, 1.0)
 	var r: float = minf(size.x, size.y) * 0.42
-	# 上下左右四块遮罩
-	draw_rect(Rect2(0, 0, size.x, center.y - r), mask)
-	draw_rect(Rect2(0, center.y + r, size.x, size.y - center.y - r), mask)
-	draw_rect(Rect2(0, center.y - r, center.x - r, r * 2.0), mask)
-	draw_rect(Rect2(center.x + r, center.y - r, size.x - center.x - r, r * 2.0), mask)
 
-	draw_arc(center, r, 0, TAU, 64, Color(0.05, 0.05, 0.05), 3.0)
+	# 真正的圆形遮罩: 旧实现用 4 个矩形挖洞, 留下的其实是一个方孔。
+	var ring: Array = build_scope_ring(center, r, size)
+	var inner: PackedVector2Array = ring[0]
+	var outer: PackedVector2Array = ring[1]
+	var seg: int = inner.size()
+	for i in seg:
+		draw_colored_polygon(PackedVector2Array([
+			inner[i], inner[(i + 1) % seg], outer[(i + 1) % seg], outer[i]]), mask)
+
+	draw_arc(center, r, 0, TAU, 96, Color(0.05, 0.05, 0.05), 3.0)
 	draw_line(center + Vector2(-r, 0), center + Vector2(r, 0), Color(0.1, 0.1, 0.1), 1.4)
 	draw_line(center + Vector2(0, -r), center + Vector2(0, r), Color(0.1, 0.1, 0.1), 1.4)
 	# 密位刻度
 	for i in range(1, 6):
 		var y: float = center.y + i * 14.0
 		if y < center.y + r:
-			var half: float = 5.0 if i % 2 == 1 else 9.0
-			draw_line(center + Vector2(-half, i * 14.0), center + Vector2(half, i * 14.0),
+			var half_w: float = 5.0 if i % 2 == 1 else 9.0
+			draw_line(center + Vector2(-half_w, i * 14.0), center + Vector2(half_w, i * 14.0),
 				Color(0.12, 0.12, 0.12), 1.3)
 	draw_circle(center, 2.0, Color(0.9, 0.1, 0.1, 0.9))
+
+	# 倍率读数: 直接显示 scope_zoom, 让"数据驱动的倍率"在画面上可验证
+	if actor != null and actor.weapon_system != null:
+		var zoom: float = float(actor.weapon_system.call("get_scope_zoom"))
+		if zoom > 1.0001:
+			var font := ThemeDB.fallback_font
+			draw_string(font, Vector2(center.x + r * 0.55, center.y + r * 0.78),
+				"%.1fx" % zoom, HORIZONTAL_ALIGNMENT_LEFT, -1, 15,
+				Color(0.06, 0.06, 0.06, 0.95))
 
 
 func _draw_damage_indicators() -> void:
@@ -296,7 +395,13 @@ func _draw_minimap() -> void:
 		var carrier: Actor = objective.get_carrier()
 		if carrier.team == actor.team:
 			var cp := _world_to_radar(carrier.global_position)
-			draw_circle(cp, 3.5, Color(1.0, 0.85, 0.2, 0.9))
+			var pulse: float = 0.6 + 0.4 * sin(Time.get_ticks_msec() * 0.010)
+			draw_circle(cp, 4.0 + 2.0 * pulse, Color(1.0, 0.85, 0.2, 0.28))
+			draw_circle(cp, 3.5, Color(1.0, 0.85, 0.2, 0.95))
+			draw_circle(cp, 3.5, Color(0, 0, 0, 0.6), false, 1.0)
+			var cfont := ThemeDB.fallback_font
+			draw_string(cfont, cp + Vector2(-14, -6), "C4",
+				HORIZONTAL_ALIGNMENT_CENTER, 28, 11, Color(1.0, 0.88, 0.3, 0.95))
 
 	# 单位
 	var spotted: Array = _get_spotted_enemies()
@@ -389,3 +494,96 @@ func _draw_action_progress() -> void:
 	var font := ThemeDB.fallback_font
 	draw_string(font, Vector2(x, y - 8), label,
 		HORIZONTAL_ALIGNMENT_CENTER, w, 14, Color(1, 1, 1, 0.95))
+
+
+# ---------------------------------------------------------------- 目标标记
+## 把方向向量 dir 延长到「以原点为中心、半宽 half 的矩形」边界上, 返回边界点。
+## 抽成 static 是为了让无头环境也能断言(与 cone_radius_px / build_scope_ring 同一约定)。
+static func border_point(dir: Vector2, half: Vector2) -> Vector2:
+	var ax: float = absf(dir.x)
+	var ay: float = absf(dir.y)
+	if ax < 0.0001 and ay < 0.0001:
+		return Vector2.ZERO
+	var tx: float = (half.x / ax) if ax > 0.0001 else INF
+	var ty: float = (half.y / ay) if ay > 0.0001 else INF
+	var t: float = minf(tx, ty)
+	if not is_finite(t) or t <= 0.0:
+		return Vector2.ZERO
+	return dir * t
+
+
+## 目标装置相关的屏幕标记: 下包点 A/B、队友携带者、已安装装置。
+## 目的(对应用户反馈"看不清谁带包/去哪下包"):
+##   * 任何存活玩家都能看到 A/B 点方位与距离(屏幕外 -> 边缘箭头);
+##   * 队友携带装置时其头顶显示醒目 C4 图标 + 名字, 全队一眼看清谁带包;
+##   * 装置一旦安装, 全场显示红色装置标记(覆盖下包点指引)。
+## 敌方携带者不显示(竞技公平)。
+func _draw_objective_markers() -> void:
+	if actor == null or not actor.alive or objective == null:
+		return
+	var cam := actor.get_camera()
+	if cam == null or not cam.is_inside_tree():
+		return
+
+	if objective.is_planted():
+		_draw_world_marker(cam, objective.get_planted_position() + Vector3(0, 1.3, 0),
+			"C4", Color(1.0, 0.22, 0.14), "装置已安装")
+		return
+
+	for s in objective.sites:
+		var site: BombSite = s as BombSite
+		if site == null:
+			continue
+		var dist: float = actor.global_position.distance_to(site.global_position)
+		_draw_world_marker(cam, site.global_position + Vector3(0, 2.3, 0),
+			site.site_name, Color(1.0, 0.72, 0.22), "%d m" % int(dist))
+
+	var carrier: Actor = objective.get_carrier()
+	if carrier != null and carrier != actor and carrier.alive \
+			and carrier.team == actor.team:
+		_draw_world_marker(cam, carrier.global_position + Vector3(0, 2.05, 0),
+			"C4", Color(1.0, 0.86, 0.25), carrier.actor_name)
+
+
+func _draw_world_marker(cam: Camera3D, world_pos: Vector3, glyph: String,
+		color: Color, label: String) -> void:
+	var behind: bool = cam.is_position_behind(world_pos)
+	var sp: Vector2 = cam.unproject_position(world_pos)
+	var center: Vector2 = size * 0.5
+	var on_screen: bool = (not behind) and Rect2(Vector2.ZERO, size).has_point(sp)
+	if on_screen:
+		_draw_marker_icon(sp, glyph, color, label)
+		return
+	var dir: Vector2 = sp - center
+	if behind:
+		dir = -dir
+	if dir.length_squared() < 0.0001:
+		return
+	var bp: Vector2 = center + border_point(dir, center - Vector2(56.0, 56.0))
+	_draw_edge_arrow(bp, dir.normalized(), color, glyph)
+
+
+func _draw_marker_icon(sp: Vector2, glyph: String, color: Color, label: String) -> void:
+	var font := ThemeDB.fallback_font
+	var r: float = 13.0
+	var poly := PackedVector2Array([
+		sp + Vector2(0, -r), sp + Vector2(r, 0), sp + Vector2(0, r), sp + Vector2(-r, 0)])
+	draw_colored_polygon(poly, Color(0, 0, 0, 0.55))
+	draw_polyline(PackedVector2Array([poly[0], poly[1], poly[2], poly[3], poly[0]]), color, 2.0)
+	draw_string(font, sp + Vector2(-r, 5), glyph, HORIZONTAL_ALIGNMENT_CENTER, int(r * 2), 14, color)
+	draw_string_outline(font, sp + Vector2(-70, r + 16), label,
+		HORIZONTAL_ALIGNMENT_CENTER, 140, 13, 3, Color(0, 0, 0, 0.85))
+	draw_string(font, sp + Vector2(-70, r + 16), label,
+		HORIZONTAL_ALIGNMENT_CENTER, 140, 13, color)
+
+
+func _draw_edge_arrow(bp: Vector2, dirn: Vector2, color: Color, glyph: String) -> void:
+	var perp := Vector2(-dirn.y, dirn.x)
+	var tip: Vector2 = bp + dirn * 12.0
+	var a: Vector2 = bp - dirn * 6.0 + perp * 9.0
+	var b: Vector2 = bp - dirn * 6.0 - perp * 9.0
+	draw_colored_polygon(PackedVector2Array([tip, a, b]), color)
+	draw_polyline(PackedVector2Array([tip, a, b, tip]), Color(0, 0, 0, 0.6), 1.5)
+	var font := ThemeDB.fallback_font
+	var lp: Vector2 = bp - dirn * 18.0
+	draw_string(font, lp + Vector2(-20, 5), glyph, HORIZONTAL_ALIGNMENT_CENTER, 40, 14, color)

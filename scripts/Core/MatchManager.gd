@@ -70,6 +70,8 @@ var push_delay: float = 6.0
 
 ## 训练场模式: 无回合推进 / 假人自动复活 / 弹药无限
 var training_mode: bool = false
+## 训练场: 上一发是否尚未判定命中(用于连击统计)
+var _training_shot_pending: bool = false
 var moving_targets: Array = []
 var _respawn_queue: Array = []
 
@@ -85,6 +87,9 @@ var _round_end_reason: String = ""
 var _last_round_winner: int = -1
 var _bomb_was_planted: bool = false
 var _stats_this_round: Dictionary = {}
+## 本局结束时唯一一次段位结算结果，供结算画面只读展示。
+## 避免 MatchResult 重复调用 report_match_result 导致 MMR 被结算两次。
+var final_rank_result: Dictionary = {}
 
 
 # ================================================================ 初始化
@@ -464,6 +469,7 @@ func _connect_signals() -> void:
 
 # ================================================================ 比赛流程
 func start_match_internal() -> void:
+	final_rank_result = {}
 	if training_mode:
 		_start_training()
 		return
@@ -790,8 +796,8 @@ func _finish_match(strike_won: bool) -> void:
 			GameManager.log_line("录像已保存: " + path)
 	# 段位结算(客户端不做, 服务器统一结算后下发; 第一阶段本地直接算)
 	if not NetworkManager.is_client:
-		var result: Dictionary = RankSystem.report_match_result(i_won)
-		EventBus.announcement.emit("MMR %+d  ·  %s" % [int(result["delta"]), str(result["tier"])], "rank")
+		final_rank_result = RankSystem.report_match_result(i_won)
+		EventBus.announcement.emit("MMR %+d  ·  %s" % [int(final_rank_result["delta"]), str(final_rank_result["tier"])], "rank")
 		if RankSystem.tier_index() >= 2:
 			SteamManager.unlock_achievement(SteamManager.ACH_RANK)
 
@@ -855,10 +861,18 @@ func _on_hit_confirmed(attacker: Node, _victim: Node, damage: float, _is_hs: boo
 	if attacker == local_player:
 		GameManager.record_stat("hits")
 		GameManager.record_stat("damage", damage)
+		if training_mode:
+			GameManager.training_hit()
+			_training_shot_pending = false
 
 
 func record_shot() -> void:
 	GameManager.record_stat("shots")
+	if training_mode:
+		# 上一发若仍未命中, 判定为空枪并重置连击
+		if _training_shot_pending:
+			GameManager.training_miss()
+		_training_shot_pending = true
 
 
 func _incr_stat(actor: Actor, key: String, amount: float) -> void:

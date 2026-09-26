@@ -207,12 +207,16 @@ func _build_weapons() -> void:
 		var data := WeaponDatabase.get_weapon(id)
 		var price: int = int(data["price"])
 		var owned: bool = actor.loadout.has_weapon(id)
+		var mode: String = str(data.get("fire_mode", "auto"))
+		var mode_cn: String = {"auto": "全自动", "semi": "半自动", "burst": "三连发",
+			"bolt": "栓动", "pump": "泵动", "melee": "近战"}.get(mode, mode)
 		_add_item(
 			str(data["display_name"]),
 			price,
 			owned,
-			"%d 伤害 / %d 发 / RPM %d" % [
-				int(data["damage"]), int(data["magazine"]), int(data["rpm"])],
+			"%s · %d 伤害 · %d 发 · RPM %d · 穿甲 %.0f%%" % [
+				mode_cn, int(data["damage"]), int(data["magazine"]),
+				int(data["rpm"]), float(data.get("armor_penetration", 0.5)) * 100.0],
 			func(): _buy_weapon(id))
 
 
@@ -232,15 +236,24 @@ func _build_gear() -> void:
 
 func _build_grenades() -> void:
 	var all: Dictionary = WeaponDatabase.get_all_grenades()
+	var kind_hint := {
+		"he": "破片 · 2 秒引信 · 高爆",
+		"impact": "瞬爆 · 碰撞起爆 · 中爆",
+		"flash": "闪光 · 致盲视线内目标",
+		"smoke": "烟雾 · 体积遮挡视线",
+		"molotov": "燃烧 · 区域持续伤害",
+	}
 	for key in all:
 		var data: Dictionary = all[key]
 		var owned: int = actor.loadout.get_grenade_count(key)
 		var max_carry: int = int(data["max_carry"])
+		var kind: String = str(data.get("kind", ""))
+		var hint: String = str(kind_hint.get(kind, ""))
 		_add_item(
 			str(data["display_name"]),
 			int(data["price"]),
 			owned >= max_carry,
-			"携带 %d / %d" % [owned, max_carry],
+			"%s  ·  携带 %d / %d" % [hint, owned, max_carry],
 			func(): _buy_grenade(key))
 
 

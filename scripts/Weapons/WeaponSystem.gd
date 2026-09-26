@@ -250,7 +250,10 @@ func _fire() -> void:
 
 	_next_fire_at = _clock + float(current_data["fire_interval"])
 
-	if str(current_data.get("unscope_after_shot", false)):
+	# 开火后自动退镜: 只有显式声明 unscope_after_shot = true 的武器(栓动狙击)才生效。
+	# 注意必须用 bool() 而不是 str(): GDScript 里 `if "false"` 恒为真,
+	# 写成 str() 会让**所有**武器每开一枪都强制退镜(ads_blend 清零)。
+	if bool(current_data.get("unscope_after_shot", false)):
 		ads_blend = 0.0
 		actor.intent.ads = false
 
@@ -373,8 +376,53 @@ func _update_ads(delta: float) -> void:
 
 	var cam := actor.get_camera()
 	if cam != null:
-		var delta_fov: float = float(current_data["ads_fov_delta"])
-		cam.fov = base_fov + delta_fov * ads_blend
+		# 满开镜目标视场角: 机瞄用 ads_fov_delta, 倍镜用 scope_zoom 换算(见 get_ads_fov)
+		cam.fov = lerpf(base_fov, get_ads_fov(), ads_blend)
+
+
+# ---------------------------------------------------------------- 倍镜 / 视场角
+## 当前武器的光学倍率。未声明 scope_zoom 或声明 <= 1.0 一律视为 1.0(无倍镜)。
+func get_scope_zoom() -> float:
+	if current_data.is_empty():
+		return 1.0
+	return maxf(float(current_data.get("scope_zoom", 1.0)), 1.0)
+
+
+func has_scope() -> bool:
+	return get_scope_zoom() > 1.0001
+
+
+## 由光学倍率换算视场角。透视投影下放大倍率等于 tan(base/2) / tan(fov/2),
+## 因此 90° 基准 + 4.0x -> 2*atan(tan(45°)/4) = 28.07°, 而不是线性的 22.5°。
+static func fov_for_zoom(base: float, zoom: float) -> float:
+	if zoom <= 1.0001:
+		return base
+	var half_tan: float = tan(deg_to_rad(clampf(base, 1.0, 179.0) * 0.5))
+	return rad_to_deg(2.0 * atan(half_tan / zoom))
+
+
+## 满开镜(ads_blend == 1)时的目标视场角。语义分工:
+##   无 scope_zoom  -> base_fov + ads_fov_delta, 即原有"机瞄"语义, 所有既有武器不变
+##   有 scope_zoom  -> 取「倍率换算视场角」与「机瞄视场角」中更窄的一个
+## 这样两个字段各司其职、不会互相打架: ads_fov_delta 决定机瞄基准,
+## scope_zoom 只允许在此基础上继续收窄视野(倍镜绝不会把视野拉得比机瞄更宽)。
+func get_ads_fov() -> float:
+	if current_data.is_empty():
+		return base_fov
+	var iron_fov: float = base_fov + float(current_data["ads_fov_delta"])
+	if not has_scope():
+		return iron_fov
+	return minf(fov_for_zoom(base_fov, get_scope_zoom()), iron_fov)
+
+
+## 开镜灵敏度补偿系数: 1 / 当前实际倍率。
+## 倍率越高 -> 系数越小 -> 转视角越慢, 保证"鼠标位移对应的屏幕位移"不随放大而放大。
+## 只对声明了 scope_zoom 的武器生效, 其余武器恒为 1.0 (不改变既有开镜手感)。
+func get_scope_sens_scale() -> float:
+	if not has_scope():
+		return 1.0
+	var eff_zoom: float = lerpf(1.0, get_scope_zoom(), clampf(ads_blend, 0.0, 1.0))
+	return 1.0 / maxf(eff_zoom, 0.001)
 
 
 func _update_spread(delta: float) -> void:

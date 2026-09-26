@@ -8,12 +8,15 @@ class_name MainMenu
 ##
 
 @onready var sensitivity_slider: HSlider
+@onready var ads_sensitivity_slider: HSlider
 @onready var fov_slider: HSlider
 @onready var volume_slider: HSlider
 @onready var sens_value: Label
+@onready var ads_sens_value: Label
 @onready var fov_value: Label
 @onready var volume_value: Label
 var fps_toggle: CheckButton
+var invert_y_toggle: CheckButton
 var crosshair_dynamic_toggle: CheckButton
 var crosshair_scale_button: Button
 var crosshair_color_button: Button
@@ -46,6 +49,7 @@ func _ready() -> void:
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 	_refresh_stats()
 	NetworkManager.join_succeeded.connect(_on_join_ok)
+	NetworkManager.join_failed.connect(_on_join_failed)
 	# 专用服务器: -- --server 启动, 无渲染无 UI, 直接开房
 	if "--server" in OS.get_cmdline_user_args():
 		_start_dedicated()
@@ -106,6 +110,15 @@ func _on_join_ok() -> void:
 		get_tree().change_scene_to_packed(packed)
 
 
+func _on_join_failed(reason: String) -> void:
+	# 连接失败可能发生在点击加入后的异步阶段，必须给出可见反馈，
+	# 否则玩家会一直停留在主菜单并误以为按钮没有响应。
+	if stats_label != null:
+		stats_label.text = "网络连接失败：%s" % reason
+	if matchmaking_panel != null:
+		matchmaking_panel.visible = false
+
+
 func _build_ui() -> void:
 	# 背景
 	var bg := ColorRect.new()
@@ -122,7 +135,7 @@ func _build_ui() -> void:
 	add_child(center)
 
 	var panel := PanelContainer.new()
-	panel.custom_minimum_size = Vector2(560, 660)
+	panel.custom_minimum_size = Vector2(600, 740)
 	var style := StyleBoxFlat.new()
 	style.bg_color = Color(0.07, 0.085, 0.11, 0.92)
 	style.set_corner_radius_all(10)
@@ -144,13 +157,14 @@ func _build_ui() -> void:
 	vbox.add_child(title)
 
 	var subtitle := Label.new()
-	subtitle.text = "5v5 战术竞技射击  ·  原创地图 PROJECT ZERO"
+	subtitle.text = "5v5 战术竞技射击  ·  3 张竞技图 + 训练场  ·  22 把武器"
 	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	subtitle.add_theme_font_size_override("font_size", 16)
 	subtitle.add_theme_color_override("font_color", Color(0.6, 0.68, 0.78))
 	vbox.add_child(subtitle)
 
 	vbox.add_child(HSeparator.new())
+	_add_section_header(vbox, "对 局 设 置")
 
 	# 选项行
 	team_button = _make_option_row(vbox, "阵营", _team_text(), func(): _cycle_team())
@@ -166,6 +180,7 @@ func _build_ui() -> void:
 	vbox.add_child(gfx_hint)
 
 	vbox.add_child(HSeparator.new())
+	_add_section_header(vbox, "控 制 与 显 示")
 
 	# 设置滑块
 	sens_value = Label.new()
@@ -174,6 +189,10 @@ func _build_ui() -> void:
 	sensitivity_slider = _make_slider(vbox, "鼠标灵敏度", sens_value,
 		0.2, 3.0, 0.05, float(GameManager.get_setting("mouse_sensitivity", 1.0)),
 		func(v: float): GameManager.set_setting("mouse_sensitivity", v))
+	ads_sens_value = Label.new()
+	ads_sensitivity_slider = _make_slider(vbox, "开镜灵敏度", ads_sens_value,
+		0.2, 1.2, 0.05, float(GameManager.get_setting("ads_sensitivity_mult", 0.78)),
+		func(v: float): GameManager.set_setting("ads_sensitivity_mult", v))
 	fov_slider = _make_slider(vbox, "视野 FOV", fov_value,
 		70.0, 120.0, 1.0, float(GameManager.get_setting("fov", 90.0)),
 		func(v: float): GameManager.set_setting("fov", v))
@@ -186,6 +205,12 @@ func _build_ui() -> void:
 	fps_toggle.toggled.connect(func(enabled: bool): GameManager.set_setting("show_fps", enabled))
 	fps_toggle.add_theme_font_size_override("font_size", 14)
 	vbox.add_child(fps_toggle)
+	invert_y_toggle = CheckButton.new()
+	invert_y_toggle.text = "反转 Y 轴"
+	invert_y_toggle.button_pressed = bool(GameManager.get_setting("invert_y", false))
+	invert_y_toggle.toggled.connect(func(enabled: bool): GameManager.set_setting("invert_y", enabled))
+	invert_y_toggle.add_theme_font_size_override("font_size", 14)
+	vbox.add_child(invert_y_toggle)
 	crosshair_dynamic_toggle = CheckButton.new()
 	crosshair_dynamic_toggle.text = "动态准星"
 	crosshair_dynamic_toggle.button_pressed = bool(GameManager.get_setting("crosshair_dynamic", true))
@@ -201,12 +226,12 @@ func _build_ui() -> void:
 	vbox.add_child(crosshair_scale_button)
 
 	crosshair_color_button = Button.new()
-	crosshair_color_button.text = "准星颜色：绿色"
 	crosshair_color_button.custom_minimum_size = Vector2(0, 30)
 	crosshair_color_button.pressed.connect(_cycle_crosshair_color)
 	crosshair_color_button.add_theme_font_size_override("font_size", 14)
 	vbox.add_child(crosshair_color_button)
 	_update_slider_labels()
+	_update_crosshair_labels()
 
 	vbox.add_child(HSeparator.new())
 
@@ -320,6 +345,15 @@ func _build_ui() -> void:
 	vbox.add_child(help)
 
 
+func _add_section_header(parent: Control, text: String) -> void:
+	var label := Label.new()
+	label.text = text
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	label.add_theme_font_size_override("font_size", 13)
+	label.add_theme_color_override("font_color", Color(0.45, 0.7, 0.85))
+	parent.add_child(label)
+
+
 func _make_option_row(parent: Control, label_text: String, value_text: String,
 		callback: Callable) -> Button:
 	var hbox := HBoxContainer.new()
@@ -378,6 +412,8 @@ func _make_slider(parent: Control, label_text: String, value_label: Label,
 
 func _update_slider_labels() -> void:
 	sens_value.text = "%.2f" % float(GameManager.get_setting("mouse_sensitivity", 1.0))
+	if ads_sens_value != null:
+		ads_sens_value.text = "%.2fx" % float(GameManager.get_setting("ads_sensitivity_mult", 0.78))
 	fov_value.text = "%d" % int(GameManager.get_setting("fov", 90.0))
 	volume_value.text = "%d%%" % int(float(GameManager.get_setting("master_volume", 0.85)) * 100)
 
@@ -449,13 +485,22 @@ func _cycle_crosshair_scale() -> void:
 
 func _cycle_crosshair_color() -> void:
 	var colors := ["#26ff80", "#55c7ff", "#ffd34d", "#ff6b6b"]
-	var names := ["绿色", "青色", "黄色", "红色"]
 	var current := str(GameManager.get_setting("crosshair_color", colors[0]))
 	var index := colors.find(current)
 	index = (index + 1) % colors.size()
 	GameManager.set_setting("crosshair_color", colors[index])
+	_update_crosshair_labels()
+
+
+func _update_crosshair_labels() -> void:
+	if crosshair_scale_button != null:
+		var scale_value := float(GameManager.get_setting("crosshair_scale", 1.0))
+		crosshair_scale_button.text = "准星尺寸：%d%%" % roundi(scale_value * 100.0)
 	if crosshair_color_button != null:
-		crosshair_color_button.text = "准星颜色：%s" % names[index]
+		var colors := ["#26ff80", "#55c7ff", "#ffd34d", "#ff6b6b"]
+		var names := ["绿色", "青色", "黄色", "红色"]
+		var index := colors.find(str(GameManager.get_setting("crosshair_color", colors[0])))
+		crosshair_color_button.text = "准星颜色：%s" % names[maxi(index, 0)]
 
 
 func _refresh_stats() -> void:
@@ -509,9 +554,14 @@ func _on_join() -> void:
 	if ip.is_empty():
 		ip = "127.0.0.1"
 	var err: int = NetworkManager.join_game(ip)
-	NetworkManager.enable_reconnect(ip, 24565)
 	if err != OK:
+		NetworkManager.disable_reconnect()
 		stats_label.text = "加入失败 (错误码 %d)" % err
+		return
+	# 只有底层 peer 创建成功后才开启自动重连；异步握手失败由
+	# NetworkManager.join_failed 信号统一反馈到主菜单。
+	NetworkManager.enable_reconnect(ip, 24565)
+	stats_label.text = "正在连接 %s:%d ..." % [ip, 24565]
 
 
 ## 背景网格绘制

@@ -72,9 +72,14 @@ func _build(winner: int, s_strike: int, s_guard: int) -> void:
 	vbox.add_child(title)
 
 	var rank := Label.new()
-	var r: Dictionary = RankSystem.report_match_result(i_won)
+	# 段位只在 MatchManager._finish_match 中结算一次；这里仅读取结果。
+	# 旧逻辑再次调用 report_match_result 会让每局结束时 MMR 被重复增减。
+	var r: Dictionary = mm.final_rank_result
+	var rank_name: String = str(r.get("tier", RankSystem.tier_name()))
+	var rank_mmr: int = int(r.get("mmr", RankSystem.mmr))
+	var rank_delta: int = int(r.get("delta", 0))
 	rank.text = "段位 %s   ·   MMR %d (%+d)   ·   战绩 %d 胜 %d 负" % [
-		str(r.get("tier", "")), int(r.get("mmr", 0)), int(r.get("delta", 0)),
+		rank_name, rank_mmr, rank_delta,
 		RankSystem.wins, RankSystem.losses]
 	rank.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	rank.add_theme_font_size_override("font_size", 20)

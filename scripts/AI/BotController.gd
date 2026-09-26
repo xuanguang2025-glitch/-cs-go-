@@ -36,16 +36,19 @@ const DIFFICULTY := [
 		# burst_min/max 是"发数", 不是帧数
 		"burst_min": 3, "burst_max": 5, "hearing": 22.0, "fov": 100.0,
 		"accuracy_mult": 0.72, "peek_chance": 0.25, "grenade_chance": 0.15,
+		"hold_reposition_min": 8.5, "hold_reposition_max": 12.0, "flank_chance": 0.12,
 	},
 	{   # 1 普通
 		"reaction": 0.32, "aim_error": 2.8, "turn_speed": 9.0,
 		"burst_min": 5, "burst_max": 9, "hearing": 32.0, "fov": 118.0,
 		"accuracy_mult": 0.88, "peek_chance": 0.45, "grenade_chance": 0.35,
+		"hold_reposition_min": 6.0, "hold_reposition_max": 9.0, "flank_chance": 0.25,
 	},
 	{   # 2 困难
 		"reaction": 0.17, "aim_error": 1.3, "turn_speed": 14.0,
 		"burst_min": 8, "burst_max": 14, "hearing": 45.0, "fov": 135.0,
 		"accuracy_mult": 1.0, "peek_chance": 0.65, "grenade_chance": 0.55,
+		"hold_reposition_min": 5.0, "hold_reposition_max": 7.5, "flank_chance": 0.35,
 	},
 ]
 
@@ -82,6 +85,14 @@ var hold_position: Vector3 = Vector3.ZERO
 ## 本回合锁定的目标炸弹点(一旦选定不再随机变动, 否则会出现"走向 A 却想装 B")
 var site_target: Vector3 = Vector3.ZERO
 var _tactic_timer: float = 0.0
+## 进攻角色: "" = 主攻, "flank" = 侧路佯攻(先走对侧路再切回点位)
+var role: String = ""
+## 佯攻中途点: 抵达后才把最终目标切成 site_target
+var _via_point: Vector3 = Vector3.ZERO
+var _has_via: bool = false
+## 防守 hold 战术的换位计时。hitscan 引擎里静止即满精度, 站桩收益过高;
+## 定时换到邻近掩体点, 让进攻方不能把准星钉死在同一个爆头线上。
+var _hold_duration: float = 0.0
 
 # 战斗
 ## 开火串按"发"计数(不是帧)。
@@ -148,6 +159,11 @@ func on_round_start() -> void:
 	_burst_pause = 0.0
 	_site_dwell = 0.0
 	_escort_wait = 0.0
+	role = ""
+	_has_via = false
+	_hold_duration = randf_range(
+		float(_diff.get("hold_reposition_min", 6.0)),
+		float(_diff.get("hold_reposition_max", 9.0)))
 	_burst_len = randi_range(int(_diff.get("burst_min", 5)), int(_diff.get("burst_max", 9)))
 	path.clear()
 	has_goal = false
@@ -180,6 +196,8 @@ func _choose_tactic() -> void:
 	if actor.loadout.has_bomb:
 		tactic = "rush"
 		_site_dwell = 0.0
+		role = ""
+		_has_via = false
 		set_move_goal(site_target)
 		return
 
@@ -189,6 +207,8 @@ func _choose_tactic() -> void:
 	if match_mgr != null and "round_number" in match_mgr:
 		round_no = int(match_mgr.round_number)
 
+	role = ""
+	_has_via = false
 	if actor.team == GameConfig.Team.STRIKE:
 		# 保枪只在"经济真的崩了"且不是手枪局时才考虑。
 		# 原判据 team_money < 1100 在手枪局(800) 必然成立, 于是首回合
@@ -201,6 +221,10 @@ func _choose_tactic() -> void:
 			tactic = "default"
 		else:
 			tactic = "slow"
+		# 侧路佯攻: 让部分进攻方先走对侧路再切点, 避免集结点到点位
+		# 这段开阔地被 A* 最短路压成"全员正面最后一跳"。
+		if tactic != "save" and randf() < float(_diff.get("flank_chance", 0.25)):
+			role = "flank"
 	else:
 		if round_no > 1 and team_money < 1000 and roll < 0.14:
 			tactic = "save"
@@ -241,7 +265,10 @@ func _assign_goal_for_tactic() -> void:
 	if team == GameConfig.Team.STRIKE:
 		match tactic:
 			"rush":
-				set_move_goal(site_target)
+				if role == "flank":
+					_begin_flank()
+				else:
+					set_move_goal(site_target)
 			"save":
 				# 退到己方后方, 但保持移动(而不是杵在原地)
 				var back_z: float = 24.0
@@ -251,7 +278,10 @@ func _assign_goal_for_tactic() -> void:
 				# default / slow: 目标就是炸弹点。
 				# 之前这里先设一个 lane 中段的临时目标, 再由 _maybe_advance
 				# 2.5 秒后改成点位 —— 那个中间态让 Bot 在 z=5 附近来回振荡。
-				set_move_goal(site_target)
+				if role == "flank":
+					_begin_flank()
+				else:
+					set_move_goal(site_target)
 	else:
 		match tactic:
 			"hold":
@@ -269,6 +299,59 @@ func _pick_site_position() -> Vector3:
 	var sites := [-20.0, 20.0]
 	var idx: int = randi() % 2
 	return Vector3(sites[idx], 0, -20.0)
+
+
+## 侧路佯攻: 先切到对侧主路, 再从侧面切入点位。
+## 直接 A* 到点只会得到"全员走最短正面路"的添油式最后一跳。
+func _begin_flank() -> void:
+	role = "flank"
+	var attack_a: bool = site_target.x <= 0.0
+	# 对侧主路下端(靠近中央大厅入口), 再从这里拐向点位
+	if attack_a:
+		_via_point = Vector3(18.0, 0.0, -3.0)
+	else:
+		_via_point = Vector3(-18.0, 0.0, -3.0)
+	# 偶尔改走更外侧的横向通道, 分散防守方枪线
+	if randf() < 0.35:
+		_via_point.x = 14.0 if attack_a else -14.0
+		_via_point.z = 6.5
+	_has_via = true
+	set_move_goal(_via_point)
+
+
+## 抵达佯攻中途点后, 把目标切回真正的炸弹点
+func _try_finish_flank() -> bool:
+	if not _has_via:
+		return false
+	if actor == null:
+		return false
+	if actor.global_position.distance_to(_via_point) > 3.5:
+		return false
+	_has_via = false
+	set_move_goal(site_target)
+	return true
+
+
+## 防守 hold 换位: 在点位周围换一个邻近警戒点。
+## 静止满精度是引擎事实, 但"永远同一个头线"会把防守胜率抬得过高。
+func _reposition_hold() -> void:
+	if actor == null:
+		return
+	var outward: Vector3 = (site_target - Vector3(0, 0, -30)).normalized()
+	if outward.length_squared() < 0.01:
+		outward = Vector3(0, 0, 1)
+	var angle: float = randf_range(-1.15, 1.15)
+	var offset_dir: Vector3 = outward.rotated(Vector3.UP, angle)
+	var new_pos: Vector3 = site_target - offset_dir * randf_range(4.5, 7.5)
+	new_pos.x = clampf(new_pos.x, -22.0, 22.0)
+	new_pos.z = clampf(new_pos.z, -28.0, -12.0)
+	new_pos.y = 0.0
+	hold_position = new_pos
+	set_move_goal(new_pos)
+	_hold_duration = randf_range(
+		float(_diff.get("hold_reposition_min", 6.0)),
+		float(_diff.get("hold_reposition_max", 9.0)))
+	_tactic_timer = 0.0
 
 
 ## 视野内最近敌人的距离; 没有可见敌人时返回一个很大的值
@@ -877,6 +960,29 @@ func _maybe_advance(delta: float) -> void:
 	# 还没到全队发起时刻: 留在集结点, 不要提前一个人冲上去
 	if actor.team == GameConfig.Team.STRIKE and _before_push():
 		return
+	# 佯攻中途: 先到对侧路, 到了再切点位
+	if actor.team == GameConfig.Team.STRIKE and _has_via:
+		if _try_finish_flank():
+			return
+		# 还没到 via 点, 不要被下面的 2.5s 推进逻辑改掉目标
+		if has_goal:
+			return
+		set_move_goal(_via_point)
+		return
+	# 防守 hold: 到点后定时换位(交火中不打断)。
+	# 装置已安装时必须放行 —— 回防拆弹优先于原地警戒。
+	if actor.team == GameConfig.Team.GUARD and tactic == "hold":
+		var planted: bool = objective != null and objective.call("is_planted")
+		if planted:
+			pass  # 落到下面的 _advance_objective, 全员回防
+		elif combat_state == CombatState.ENGAGE:
+			_tactic_timer = 0.0
+			return
+		elif _tactic_timer >= _hold_duration:
+			_reposition_hold()
+			return
+		else:
+			return
 	if _tactic_timer < (5.0 if tactic == "save" else 2.5):
 		return
 	_tactic_timer = 0.0
@@ -904,6 +1010,11 @@ func _advance_objective() -> void:
 	if actor == null:
 		return
 	if actor.team == GameConfig.Team.STRIKE:
+		# 佯攻未完成: 继续走对侧路
+		if _has_via:
+			if not _try_finish_flank():
+				set_move_goal(_via_point)
+			return
 		# 目标始终是炸弹点, 走哪条路交给 A*。之前按 z 阈值分段推进,
 		# Bot 会在阈值线附近来回振荡, 永远走不进点。
 		set_move_goal(site_target)
@@ -928,6 +1039,10 @@ func _advance_objective() -> void:
 func _on_goal_reached() -> void:
 	if actor == null:
 		return
+	# 佯攻中途点抵达 -> 切向真正的点位
+	if actor.team == GameConfig.Team.STRIKE and _has_via:
+		if _try_finish_flank():
+			return
 	if actor.team == GameConfig.Team.STRIKE:
 		if actor.loadout.has_bomb:
 			# 只有真的站进了点位才进入安装状态。
@@ -945,6 +1060,7 @@ func _on_goal_reached() -> void:
 			_tactic_timer = 0.0
 	else:
 		hold_position = actor.global_position
+		_tactic_timer = 0.0
 
 
 # ---------------------------------------------------------------- 开火
@@ -1097,7 +1213,7 @@ func _update_utility(delta: float) -> void:
 	var kind: String = str(WeaponDatabase.get_grenade(gid).get("kind", "he"))
 
 	# 只在合理情形使用
-	if kind == "he" and target != null and target.alive:
+	if (kind == "he" or kind == "impact") and target != null and target.alive:
 		actor.intent.throw_grenade = gid
 		_grenade_cooldown = 8.0
 	elif kind == "flash" and combat_state == CombatState.ENGAGE:

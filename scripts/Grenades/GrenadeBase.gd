@@ -110,8 +110,8 @@ func _on_body_entered(body: Node) -> void:
 		return
 	_bounce_count += 1
 	_play_bounce()
-	# 燃烧弹触地即燃
-	if kind == "molotov":
+	# 燃烧弹/瞬爆弹: 触地即起效
+	if kind == "molotov" or kind == "impact":
 		explode()
 
 
@@ -130,7 +130,7 @@ func explode() -> void:
 	var pos := global_position
 
 	match kind:
-		"he":
+		"he", "impact":
 			_explode_he(pos)
 		"flash":
 			_explode_flash(pos)
@@ -153,6 +153,9 @@ func _explode_he(pos: Vector3) -> void:
 	var max_damage: float = float(data.get("damage", 98.0))
 	var armor_pen: float = float(data.get("armor_penetration", 0.55))
 	var impulse: float = float(data.get("impulse", 7.0))
+	# 投掷者自伤上限。未声明该字段(或 <= 0)的投掷物保持原有行为:
+	# 对自己的雷吃满伤害。声明了才生效 -> 瞬爆弹贴身起爆不会变成自杀雷。
+	var max_safe: float = float(data.get("max_safe_damage", 0.0))
 
 	if GameManager.sound_manager != null:
 		GameManager.sound_manager.play_3d("explosion", pos, 2.0, randf_range(0.92, 1.08), 110.0)
@@ -171,9 +174,13 @@ func _explode_he(pos: Vector3) -> void:
 		# 线性衰减
 		var falloff: float = 1.0 - clampf(dist / radius, 0.0, 1.0)
 		var dmg: float = max_damage * falloff * falloff
+		# 自伤封顶: 只作用于投掷者本人, 队友/敌人的伤害完全不受影响。
+		if max_safe > 0.0 and thrower != null and a == thrower:
+			dmg = minf(dmg, max_safe)
 		if dmg <= 1.0:
 			continue
-		# 爆炸伤害无视队伍归属(对自己的雷也生效)
+		# 爆炸伤害无视队伍归属(对自己的雷也生效), 但投掷者本人可被
+		# max_safe_damage 封顶 —— 见上方 dmg 计算。
 		a.health.pending_weapon_id = "he"
 		a.health.pending_killer = thrower
 		a.health.apply_damage(dmg, armor_pen, false, GameConfig.HitGroup.BODY, thrower)

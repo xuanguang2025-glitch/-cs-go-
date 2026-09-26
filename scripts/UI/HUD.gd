@@ -486,9 +486,11 @@ func _process(delta: float) -> void:
 		var mag_max: int = int(WeaponDatabase.get_weapon(ws.current_id).get("magazine", 30))
 		ammo_label.add_theme_color_override("font_color",
 			Color(1.0, 0.35, 0.3) if ammo.x <= mag_max * 0.25 else Color(1, 1, 1))
-		# 准星随扩散张开
+		# 准星留白交给 HudCanvas 自己按"真实扩散锥的屏幕投影"算(见 cone_radius_px),
+		# 这里只保留一个显式覆盖口子: 传 -1 表示"自动"。旧的 `3.0 + spread * 1.35`
+		# 是与视场角无关的经验映射, 在 105° 视场下把散布低估约 3 倍(G1)。
 		var spread: float = ws.get_current_spread()
-		hud_canvas.crosshair_gap = 3.0 + spread * 1.35
+		hud_canvas.crosshair_gap = HudCanvas.CROSSHAIR_GAP_AUTO
 		hud_canvas.crosshair_dot = spread > 5.0
 
 	# 计时
@@ -592,8 +594,11 @@ func _update_training_overlay() -> void:
 		return
 	var shots: int = int(GameManager.training_session.get("shots", 0))
 	var hits: int = int(GameManager.training_session.get("hits", 0))
+	var streak: int = int(GameManager.training_session.get("streak", 0))
+	var best: int = int(GameManager.training_session.get("best_streak", 0))
 	var accuracy: float = float(hits) / float(maxi(shots, 1)) * 100.0
-	training_label.text = "训练场 · 无限弹药\n命中 %d / %d  ·  命中率 %.1f%%" % [hits, shots, accuracy]
+	training_label.text = "训练场 · 无限弹药 · B 换枪\n命中 %d / %d  ·  命中率 %.1f%%\n连击 %d  ·  最高连击 %d" % [
+		hits, shots, accuracy, streak, best]
 
 
 func _update_combat_stats_overlay() -> void:

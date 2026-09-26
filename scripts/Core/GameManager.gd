@@ -33,6 +33,7 @@ var settings: Dictionary = {
 	"raw_input": true,
 	"invert_y": false,
 }
+var _loading_settings: bool = false
 
 var player_name: String = "PLAYER"
 var selected_team: int = GameConfig.Team.STRIKE
@@ -47,7 +48,7 @@ var stats: Dictionary = {
 }
 
 var training_session: Dictionary = {
-	"shots": 0, "hits": 0, "damage": 0.0,
+	"shots": 0, "hits": 0, "damage": 0.0, "streak": 0, "best_streak": 0,
 }
 
 ## 场景切换时传递给 GameRoot 的开局参数
@@ -103,6 +104,19 @@ func get_setting(key: String, fallback: Variant = null) -> Variant:
 
 
 func set_setting(key: String, value: Variant) -> void:
+	# 设置来自滑块/存档等多个入口，统一在这里限幅，避免损坏的配置
+	# 把 FOV、音量或灵敏度写成 NaN/越界值后污染运行时状态。
+	match key:
+		"mouse_sensitivity": value = clampf(float(value), 0.2, 3.0)
+		"ads_sensitivity_mult": value = clampf(float(value), 0.2, 1.2)
+		"fov": value = clampf(float(value), 70.0, 120.0)
+		"master_volume", "sfx_volume": value = clampf(float(value), 0.0, 1.0)
+		"graphics_quality": value = clampi(int(value), 0, 5)
+		"crosshair_scale": value = clampf(float(value), 0.75, 1.25)
+		"crosshair_color":
+			var color_text := str(value)
+			value = color_text if color_text in ["#26ff80", "#55c7ff", "#ffd34d", "#ff6b6b"] else "#26ff80"
+		"show_fps", "crosshair_dynamic", "raw_input", "invert_y": value = bool(value)
 	settings[key] = value
 	if key == "master_volume":
 		var idx := AudioServer.get_bus_index("Master")
@@ -115,7 +129,8 @@ func set_setting(key: String, value: Variant) -> void:
 		if local_player.weapon_system != null:
 			local_player.weapon_system.base_fov = float(value)
 	settings_changed.emit()
-	save_settings()
+	if not _loading_settings:
+		save_settings()
 
 
 func save_settings() -> void:
@@ -137,8 +152,14 @@ func load_settings() -> void:
 	var parsed = JSON.parse_string(f.get_as_text())
 	f.close()
 	if parsed is Dictionary:
+		_loading_settings = true
 		for k in parsed:
-			settings[k] = parsed[k]
+			# 通过同一入口加载并校验，兼容旧版本配置且拒绝越界值。
+			if settings.has(k):
+				set_setting(str(k), parsed[k])
+		_loading_settings = false
+		# 只在全部字段校验完成后写回一次，避免启动时重复写盘。
+		save_settings()
 
 
 # ---------------------------------------------------------------- 统计
@@ -146,12 +167,27 @@ func record_stat(key: String, amount: float = 1.0) -> void:
 	if not stats.has(key):
 		stats[key] = 0
 	stats[key] = float(stats[key]) + amount
-	if training_session.has(key):
-		training_session[key] = float(training_session[key]) + amount
+	# hits / streak 由 training_hit() 维护, 这里只同步 shots / damage
+	if key == "shots" or key == "damage":
+		if training_session.has(key):
+			training_session[key] = float(training_session[key]) + amount
 
 
 func reset_training_session() -> void:
-	training_session = {"shots": 0, "hits": 0, "damage": 0.0}
+	training_session = {"shots": 0, "hits": 0, "damage": 0.0, "streak": 0, "best_streak": 0}
+
+
+## 训练场命中连击
+func training_hit() -> void:
+	training_session["hits"] = int(training_session["hits"]) + 1
+	training_session["streak"] = int(training_session["streak"]) + 1
+	var st: int = int(training_session["streak"])
+	if st > int(training_session["best_streak"]):
+		training_session["best_streak"] = st
+
+
+func training_miss() -> void:
+	training_session["streak"] = 0
 
 
 func get_accuracy() -> float:

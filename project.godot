@@ -54,17 +54,91 @@ common/physics_interpolation=false
 
 [rendering]
 
+; ══════════════════════════════════════════════════════════════════════
+; 画面质量基线（A1 画质重做, 2026-09）
+; 这里只放「渲染管线初始化时读取一次」的默认值 —— 也就是切画质档位
+; 无法在运行期更改、必须重启才生效的那些。运行期真正可切的部分
+; 全部由 scripts/Core/GraphicsQuality.gd 在 Viewport / Environment 上设置。
+;
+; 历史值对照（改造前 → 改造后）:
+;   msaa_3d           1(2x)  → 2(4x)      抗锯齿从"聊胜于无"到真正有效
+;   screen_space_aa   1(FXAA)→ 0(关)      改用 TAA, 避免 FXAA 二次糊化
+;   use_taa           false  → true       本引擎最有效的 AA
+;   aniso             8(非法) → 3(8x)     原值超出枚举(0..4), 实际从未生效
+;   dir_soft_filter   2      → 3(Ultra)   软阴影滤波提一档
+;   pos_shadow_filter 未设置 → 3(Ultra)   位置光阴影滤波对齐
+;   occlusion 剔除    false  → true       原实现只建 BVH 却从不启用(纯浪费)
+;   reflection_size   256    → 512        反射探针贴图分辨率
+;   ggx_samples       32     → 64         天空反射质量
+;   sdfgi 收敛        5      → 3          动态 GI 收敛更快(更少闪烁)
+;   sdfgi 射线        1      → 2          每探针射线数, GI 噪点更少
+;
+; 试过但**回退**的项（记录以免后人重复踩坑, 见 outputs/A1_visual_upgrade_notes.md）:
+;   dir_shadow 8192     → 回退 4096   阴影图 8192 在 4 级联下每级 4096, 视觉
+;                                     增益有限, 但占 134MB 显存并拖累软阴影滤波
+;   ssao/ssil half=false → 回退 true  全分辨率接触阴影是 4 倍像素开销
+;   材质 16x 各向异性    → 回退无各向异性  三平面已 3 次采样, 再叠加各向异性
+;                                     会把掠射角大平面的采样成本放大一个数量级
+;   SDFGI 开在"高"档     → 改为仅"超高/电影"  实测 SDFGI 约 11ms, 占满
+;                                     141 FPS(7.09ms) 的全部预算, 不能进默认档
+; ══════════════════════════════════════════════════════════════════════
+
+; ---- 渲染后端 ----
 renderer/rendering_method="forward_plus"
 renderer/rendering_method.mobile="mobile"
 textures/vram_compression/import_etc2_astc=false
-anti_aliasing/quality/msaa_3d=1
-anti_aliasing/quality/screen_space_aa=1
+
+; ---- 抗锯齿: TAA 为主; FXAA 仅在关闭 TAA 的档位(低/竞技兜底)由代码打开 ----
+anti_aliasing/quality/msaa_3d=2
+anti_aliasing/quality/screen_space_aa=0
+anti_aliasing/quality/use_taa=true
 anti_aliasing/quality/use_debanding=true
+anti_aliasing/screen_space_roughness_limiter/enabled=true
+anti_aliasing/screen_space_roughness_limiter/amount=0.25
+anti_aliasing/screen_space_roughness_limiter/limit=0.15
+
+; ---- 阴影 ----
+lights_and_shadows/directional_shadow/size=4096
+lights_and_shadows/directional_shadow/soft_shadow_filter_quality=3
+lights_and_shadows/positional_shadow/atlas_size=4096
+lights_and_shadows/positional_shadow/soft_shadow_filter_quality=3
+lights_and_shadows/directional_shadow/16_bits=true
+
+; ---- 环境: SSAO / SSIL ----
+; half_size 保持 true。改成全分辨率视觉收益有限(接触阴影本来就模糊),
+; 但按像素看是 4 倍开销, 在 141 FPS 的预算里不值得。
+environment/ssao/half_size=true
+environment/ssao/quality=2
+environment/ssao/adaptive_target=0.5
+environment/ssil/half_size=true
+environment/ssil/quality=2
+environment/ssil/blur_passes=4
+environment/screen_space_reflection/roughness_quality=2
+
+; ---- 全局光照: SDFGI 动态全局光照(实时软 GI, 本引擎最接近光追 GI 的能力) ----
+global_illumination/sdfgi/frames_to_converge=3
+global_illumination/sdfgi/frames_to_update_lights=2
+global_illumination/sdfgi/probe_ray_count=2
+
+; ---- 反射: 天空 GGX 采样 + 反射探针图集 ----
+reflections/sky_reflections/ggx_samples=64
+reflections/sky_reflections/roughness_layers=8
+reflections/sky_reflections/fast_filter_high_quality=true
+reflections/reflection_atlas/reflection_size=512
+reflections/reflection_atlas/reflection_count=32
+
+; ---- 采样与过滤 ----
+textures/default_filters/anisotropic_filtering_level=3
 textures/canvas_textures/default_texture_filter=0
+
+; ---- 遮挡剔除: 启用 BVH 剔除(建了 BVH 就必须启用, 否则白建) ----
+occlusion_culling/use_occlusion_culling=true
+occlusion_culling/bvh_build_quality=3
+occlusion_culling/jitter_projection=true
+world/occlusion_culling/build_quality=3
+
+; ---- 其它 ----
 environment/defaults/default_clear_color=Color(0.05, 0.06, 0.08, 1)
-lights_and_shadows/directional_shadow/soft_shadow_filter_quality=2
-textures/default_filters/anisotropic_filtering_level=8
-world/occlusion_culling/build_quality=2
 
 [debug]
 

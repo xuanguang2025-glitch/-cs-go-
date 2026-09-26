@@ -16,6 +16,7 @@ class_name EnvForge
 ##
 
 const ENV_GROUP := "ps_world_env"
+const PROBE_GROUP := "ps_reflection_probe"
 
 
 # ================================================================ 对外接口
@@ -24,6 +25,7 @@ static func build_day(root: Node3D) -> void:
 	var env := _make_env(root, "day")
 	_apply_day(env)
 	_sun(root, Color(1.0, 0.96, 0.88), 2.35, Vector3(-48, 38, 0), 1.1, 95.0)
+	_reflection_probes(root)
 	_apply_quality(env)
 
 
@@ -33,6 +35,7 @@ static func build_night(root: Node3D) -> void:
 	_apply_night(env)
 	_sun(root, Color(0.66, 0.76, 1.0), 0.95, Vector3(-55, -30, 0), 2.0, 80.0)
 	_fill(root, Color(0.30, 0.38, 0.58), 0.42, Vector3(-20, 150, 0))
+	_reflection_probes(root)
 	_apply_quality(env)
 
 
@@ -42,7 +45,46 @@ static func build_dusk(root: Node3D) -> void:
 	_apply_dusk(env)
 	_sun(root, Color(1.0, 0.58, 0.32), 2.05, Vector3(-13, 42, 0), 1.4, 95.0)
 	_fill(root, Color(0.45, 0.42, 0.58), 0.55, Vector3(-30, -135, 0))
+	_reflection_probes(root)
 	_apply_quality(env)
+
+
+## 反射探针: 本引擎没有光追反射, 但"盒式投影反射探针"能以近乎零的
+## 运行期代价提供**真实的空间反射**(一次烘焙 UPDATE_ONCE, 之后不再渲染)。
+## 这是金属集装箱/玻璃/湿地面上"光追级反光"最划算的近似手段:
+## 配合 SSR(超高以上) 与天空反射, 三层叠加已经很难和真光追区分。
+## 竞技档跳过 —— 反射会降低轮廓对比度。
+static func _reflection_probes(root: Node3D) -> void:
+	var p: Dictionary = GraphicsQuality.preset()
+	if bool(p.get("competitive", false)):
+		return
+	if not bool(p.get("reflection_probe", true)):
+		return
+	var energy: float = float(p.get("probe_energy", 1.0))
+	var shadows: bool = int(p.get("tier", GraphicsQuality.Tier.MEDIUM)) >= GraphicsQuality.Tier.ULTRA
+
+	var probes := [
+		# 中央大厅
+		{"name": "ProbeHall", "pos": Vector3(0.0, 6.0, -10.0), "size": Vector3(40.0, 14.0, 34.0)},
+		# 进攻方半场(中路长通道)
+		{"name": "ProbeNorth", "pos": Vector3(0.0, 6.0, 16.0), "size": Vector3(56.0, 14.0, 40.0)},
+	]
+	for cfg in probes:
+		var rp := ReflectionProbe.new()
+		rp.name = str(cfg["name"])
+		rp.size = cfg["size"]
+		rp.origin_offset = cfg["pos"]
+		rp.position = Vector3.ZERO
+		rp.box_projection = true          # 盒式投影: 反射像"房间"而不是"球"
+		rp.interior = false
+		rp.enable_shadows = shadows
+		rp.update_mode = ReflectionProbe.UPDATE_ONCE
+		rp.intensity = energy
+		rp.max_distance = 90.0
+		rp.blend_distance = 4.0
+		rp.add_to_group(PROBE_GROUP)
+		root.add_child(rp)
+
 
 
 ## 画质档位变化时原地重新调校场景内所有已建环境
@@ -51,11 +93,19 @@ static func retune_all() -> void:
 	if st == null:
 		return
 	var tree: SceneTree = st
+	var p: Dictionary = GraphicsQuality.preset()
+	var comp: bool = bool(p.get("competitive", false))
+	var energy: float = 0.0 if comp else float(p.get("probe_energy", 1.0))
 	for node in tree.get_nodes_in_group(ENV_GROUP):
 		if node is WorldEnvironment:
 			var e: Environment = (node as WorldEnvironment).environment
 			if e != null:
 				_apply_quality(e)
+	for node in tree.get_nodes_in_group(PROBE_GROUP):
+		if node is ReflectionProbe:
+			var rp: ReflectionProbe = node
+			rp.intensity = energy
+			rp.enable_shadows = int(p.get("tier", 0)) >= GraphicsQuality.Tier.ULTRA and not comp
 
 
 ## 对单个 Environment 应用当前画质档位(重头戏: 开销大的效果在低档位关掉)
@@ -104,12 +154,34 @@ static func _apply_quality(env: Environment) -> void:
 	var base_fog_density: float = float(env.get_meta("ps_base_fog_density", env.fog_density))
 	env.fog_density = base_fog_density * (0.55 if competitive else 1.0)
 
+	# SDFGI: 本引擎能提供的最接近"实时光追 GI"的能力(动态无限次弹射的
+	# 全局光照探针级联)。它同时负责: 间接光反弹、颜色渗透、天空光落地、
+	# 由真实几何遮挡产生的接触变暗 —— 这些是让纯色盒子"变成实景"的关键。
+	# 代价最大, 因此严格按档位开关, 且用 y_scale 压缩垂直方向体素(本作地图
+	# 是 72x72 的扁平原, 垂直方向不需要等分辨率)。
+	var sdfgi_on: bool = bool(p.get("sdfgi", false)) and not competitive and tier >= GraphicsQuality.Tier.HIGH
+	_try_set(env, "sdfgi_enabled", sdfgi_on)
+	if sdfgi_on:
+		_try_set(env, "sdfgi_cascades", int(p.get("sdfgi_cascades", 3)))
+		_try_set(env, "sdfgi_min_cell_size", 0.2)
+		_try_set(env, "sdfgi_use_occlusion", bool(p.get("sdfgi_occlusion", false)))
+		_try_set(env, "sdfgi_read_sky_light", true)
+		_try_set(env, "sdfgi_bounce_feedback", 0.5)
+		_try_set(env, "sdfgi_energy", float(p.get("sdfgi_energy", 1.0)))
+		_try_set(env, "sdfgi_normal_bias", 1.1)
+		_try_set(env, "sdfgi_probe_bias", 1.1)
+		_try_set(env, "sdfgi_y_scale", int(p.get("sdfgi_y_scale", 2)))
+		_try_set(env, "sdfgi_max_distance", 120.0)
+
 	# 泛光分级: 只让枪火、灯具和霓虹等 HDR 光源产生光晕，避免廉价全屏发白。
 	var levels: Array = p.get("glow_levels", [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 	if env.has_method("set_glow_level"):
 		for i in 7:
 			env.set_glow_level(i, float(levels[i]))
-	env.glow_enabled = not competitive or tier == GraphicsQuality.Tier.COMPETITIVE
+	# 注: 原实现是 `not competitive or tier == COMPETITIVE`, 该表达式恒为真,
+	# 等于"泛光永远开"。这里改成显式语义 —— 泛光全档位保留(枪火/霓虹是
+	# 本作最重要的视觉信息), 只调强度, 不再用无意义的布尔表达式。
+	env.glow_enabled = true
 	env.glow_intensity = 0.34 if competitive else (0.56 if high else 0.46)
 	env.glow_strength = 0.72 if competitive else 0.9
 	env.glow_hdr_threshold = 1.15 if competitive else 1.0
@@ -117,6 +189,7 @@ static func _apply_quality(env: Environment) -> void:
 	_try_set(env, "ssr_max_steps", 48 if tier >= GraphicsQuality.Tier.CINEMATIC else 24)
 	_try_set(env, "ssr_fade_in", 0.55)
 	_try_set(env, "ssr_fade_out", 0.72)
+	_try_set(env, "ssr_depth_tolerance", 0.3)
 
 
 # ================================================================ 环境模板
@@ -147,6 +220,11 @@ static func _make_env(root: Node3D, preset: String) -> Environment:
 	world_env.environment = env
 	world_env.add_to_group(ENV_GROUP)
 	root.add_child(world_env)
+
+	# 材质升级必须在几何体建完之后扫, 所以挂到 root 的 tree_entered 上做
+	# 一次性延迟执行 —— MapBuilder 是同步建完所有块再交给 MatchManager 入树的,
+	# 入树那一刻整张地图已经是完整子树。这样无需改动 MapBuilder 一行代码。
+	MaterialForge.install(root)
 	return env
 
 
@@ -279,6 +357,10 @@ static func _apply_dusk(env: Environment) -> void:
 # ================================================================ 灯光
 static func _sun(root: Node3D, color: Color, energy: float, rot: Vector3,
 		blur: float, max_dist: float) -> void:
+	var p: Dictionary = GraphicsQuality.preset()
+	var high: bool = int(p.get("tier", GraphicsQuality.Tier.MEDIUM)) >= GraphicsQuality.Tier.HIGH
+	var comp: bool = bool(p.get("competitive", false))
+
 	var sun := DirectionalLight3D.new()
 	sun.name = "SunLight"
 	sun.light_color = color
@@ -291,10 +373,17 @@ static func _sun(root: Node3D, color: Color, energy: float, rot: Vector3,
 	sun.directional_shadow_split_2 = 0.12
 	sun.directional_shadow_split_3 = 0.35
 	sun.directional_shadow_fade_start = 0.85
-	sun.light_cull_mask = ~(GameConfig.FX_VISUAL_LAYER)
+	# 4 级级联 + 分割间混合: 消除远景阴影从"清晰"跳到"糊"的硬边界,
+	# 是提升"整体画面工业感"最便宜的一刀。竞技档关掉混合, 保轮廓锐利。
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
+	sun.directional_shadow_blend_splits = high and not comp
+	# 阴影偏移按世界尺度调, 避免细长几何体(管道/栏杆)出现漏光或自阴影痤疮
+	_try_set(sun, "shadow_bias", 0.035)
+	_try_set(sun, "shadow_normal_bias", 1.0 if comp else 1.4)
 	_try_set(sun, "shadow_opacity", 0.92)
-	_try_set(sun, "shadow_normal_bias", 1.0)
-	_try_set(sun, "light_angular_distance", 0.45)
+	# 太阳视直径 → 阴影半影。0.45° 接近真实太阳, 1.2° 更"电影"但会糊掉轮廓。
+	_try_set(sun, "light_angular_distance", 0.45 if comp else 0.9)
+	sun.light_cull_mask = ~(GameConfig.FX_VISUAL_LAYER)
 	root.add_child(sun)
 
 

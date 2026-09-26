@@ -79,6 +79,12 @@ var _capsule: CapsuleShape3D
 var _model_root: Node3D          # 第三人称模型
 var _held_weapon: Node3D = null  # 第三人称持枪模型(远端角色可见)
 
+# 队伍配色材质(换边时只需改这几张, 不必遍历节点重建)
+var _mat_cloth: StandardMaterial3D = null
+var _mat_armor: StandardMaterial3D = null
+var _mat_helmet: StandardMaterial3D = null
+var _mat_pants: StandardMaterial3D = null
+
 var _footstep_accum: float = 0.0
 var _last_surface: int = GameConfig.SurfaceMat.CONCRETE
 
@@ -206,90 +212,108 @@ func _make_hitbox(node_name: String, group: int) -> Area3D:
 
 
 ## 程序化生成第三人称身体(纯几何体, 不使用任何外部模型资源)
+## 目标: 更接近真实人体比例的战术士兵, 而非"胶囊+球+鼻锥"。
+## 分层材质(皮肤/作战服/护甲/头盔/战靴)让轮廓有体积与装备感; 命中盒独立于外观, 不受影响。
 func _build_body_model() -> void:
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = GameConfig.TEAM_COLOR.get(team, Color.WHITE).darkened(0.25)
-	mat.roughness = 0.75
+	var base: Color = GameConfig.TEAM_COLOR.get(team, Color.WHITE)
+	var skin := _mk_mat(Color(0.72, 0.56, 0.44), 0.9)
+	_mat_cloth = _mk_mat(base.darkened(0.28), 0.82)
+	_mat_armor = _mk_mat(base.darkened(0.52), 0.6, 0.12)
+	_mat_helmet = _mk_mat(base.darkened(0.42), 0.5, 0.18)
+	var gear := _mk_mat(Color(0.11, 0.11, 0.12), 0.7)   # 手套 / 战靴 / 腰带
+	var pants := _mk_mat(base.darkened(0.62), 0.85)
+	_mat_pants = pants
 
-	var torso := MeshInstance3D.new()
-	var torso_mesh := CapsuleMesh.new()
-	torso_mesh.radius = 0.30
-	torso_mesh.height = 0.80
-	torso.mesh = torso_mesh
-	torso.material_override = mat
-	torso.position = Vector3(0, 1.15, 0)
-	_model_root.add_child(torso)
+	# ---- 躯干: 胸腔 + 腹部 + 战术背心 + 腰带 ----
+	var chest := BoxMesh.new(); chest.size = Vector3(0.36, 0.34, 0.22)
+	_add_mesh(_model_root, chest, _mat_cloth, Vector3(0, 1.28, 0))
+	var belly := BoxMesh.new(); belly.size = Vector3(0.30, 0.22, 0.19)
+	_add_mesh(_model_root, belly, _mat_cloth, Vector3(0, 1.03, 0))
+	var vest := BoxMesh.new(); vest.size = Vector3(0.38, 0.32, 0.26)
+	_add_mesh(_model_root, vest, _mat_armor, Vector3(0, 1.27, 0))
+	var belt := BoxMesh.new(); belt.size = Vector3(0.33, 0.07, 0.21)
+	_add_mesh(_model_root, belt, gear, Vector3(0, 0.93, 0))
 
-	var head := MeshInstance3D.new()
-	var head_mesh := SphereMesh.new()
-	head_mesh.radius = 0.17
-	head_mesh.height = 0.34
-	head.mesh = head_mesh
-	head.material_override = mat
-	head.position = Vector3(0, 1.68, 0)
-	_model_root.add_child(head)
+	# ---- 颈 / 头 / 头盔 ----
+	var neck := CylinderMesh.new()
+	neck.top_radius = 0.055; neck.bottom_radius = 0.06; neck.height = 0.10
+	_add_mesh(_model_root, neck, skin, Vector3(0, 1.49, 0))
+	var head := SphereMesh.new(); head.radius = 0.115; head.height = 0.23
+	_add_mesh(_model_root, head, skin, Vector3(0, 1.61, 0))
+	var helmet := SphereMesh.new(); helmet.radius = 0.135; helmet.height = 0.27
+	_add_mesh(_model_root, helmet, _mat_helmet, Vector3(0, 1.645, 0),
+		Vector3.ZERO, Vector3(1.0, 0.86, 1.05))
 
-	var legs := MeshInstance3D.new()
-	var legs_mesh := CylinderMesh.new()
-	legs_mesh.top_radius = 0.24
-	legs_mesh.bottom_radius = 0.20
-	legs_mesh.height = 0.72
-	legs.mesh = legs_mesh
-	legs.material_override = mat
-	legs.position = Vector3(0, 0.42, 0)
-	_model_root.add_child(legs)
+	# ---- 肩 ----
+	var sh_mesh := SphereMesh.new(); sh_mesh.radius = 0.085; sh_mesh.height = 0.17
+	for sx in [-1, 1]:
+		_add_mesh(_model_root, sh_mesh, _mat_armor, Vector3(0.20 * sx, 1.40, 0))
 
-	# 面朝方向指示(鼻锥), 方便辨认朝向
-	var nose := MeshInstance3D.new()
-	var nose_mesh := BoxMesh.new()
-	nose_mesh.size = Vector3(0.08, 0.08, 0.22)
-	nose.mesh = nose_mesh
-	nose.material_override = mat
-	nose.position = Vector3(0, 1.66, -0.18)
-	_model_root.add_child(nose)
+	# ---- 骨盆 ----
+	var pelvis := BoxMesh.new(); pelvis.size = Vector3(0.30, 0.16, 0.19)
+	_add_mesh(_model_root, pelvis, pants, Vector3(0, 0.86, 0))
 
-
-# ================================================================ 生成 / 死亡
-
-	# ---- 程序化四肢(用于行走/持枪姿态动画) ----
-	var leg_pivot_height := 0.74
+	# ---- 腿(单枢轴: 大腿+小腿+战靴, 由动画整体摆动) ----
+	var leg_pivot_height := 0.86
 	for side in [-1, 1]:
 		var pivot := Node3D.new()
 		pivot.name = "LegPivot" + ("L" if side < 0 else "R")
-		pivot.position = Vector3(0.13 * side, leg_pivot_height, 0)
+		pivot.position = Vector3(0.11 * side, leg_pivot_height, 0)
 		_model_root.add_child(pivot)
-
-		var leg := MeshInstance3D.new()
-		var leg_mesh := CylinderMesh.new()
-		leg_mesh.top_radius = 0.10
-		leg_mesh.bottom_radius = 0.09
-		leg_mesh.height = 0.72
-		leg_mesh.radial_segments = 6
-		leg.mesh = leg_mesh
-		leg.material_override = mat
-		leg.position = Vector3(0, -0.36, 0)
-		pivot.add_child(leg)
+		var thigh := CylinderMesh.new()
+		thigh.top_radius = 0.095; thigh.bottom_radius = 0.08; thigh.height = 0.42
+		thigh.radial_segments = 10
+		_add_mesh(pivot, thigh, pants, Vector3(0, -0.21, 0))
+		var shin := CylinderMesh.new()
+		shin.top_radius = 0.075; shin.bottom_radius = 0.06; shin.height = 0.40
+		shin.radial_segments = 10
+		_add_mesh(pivot, shin, pants, Vector3(0, -0.61, 0))
+		var boot := BoxMesh.new(); boot.size = Vector3(0.12, 0.10, 0.26)
+		_add_mesh(pivot, boot, gear, Vector3(0, -0.82, -0.035))
 		if side < 0: _leg_l = pivot
 		else: _leg_r = pivot
 
+	# ---- 手臂(单枢轴: 上臂+前臂+手, 由动画整体前伸持枪) ----
 	for side2 in [-1, 1]:
 		var sh := Node3D.new()
 		sh.name = "ArmPivot" + ("L" if side2 < 0 else "R")
-		sh.position = Vector3(0.31 * side2, 1.46, 0)
+		sh.position = Vector3(0.22 * side2, 1.40, 0)
 		_model_root.add_child(sh)
-
-		var arm := MeshInstance3D.new()
-		var arm_mesh := CylinderMesh.new()
-		arm_mesh.top_radius = 0.075
-		arm_mesh.bottom_radius = 0.065
-		arm_mesh.height = 0.62
-		arm_mesh.radial_segments = 6
-		arm.mesh = arm_mesh
-		arm.material_override = mat
-		arm.position = Vector3(0, -0.31, 0)
-		sh.add_child(arm)
+		var upper := CylinderMesh.new()
+		upper.top_radius = 0.065; upper.bottom_radius = 0.055; upper.height = 0.28
+		upper.radial_segments = 10
+		_add_mesh(sh, upper, _mat_cloth, Vector3(0, -0.15, 0))
+		var fore := CylinderMesh.new()
+		fore.top_radius = 0.052; fore.bottom_radius = 0.045; fore.height = 0.26
+		fore.radial_segments = 10
+		_add_mesh(sh, fore, _mat_cloth, Vector3(0, -0.40, 0))
+		var hand := SphereMesh.new(); hand.radius = 0.058; hand.height = 0.116
+		_add_mesh(sh, hand, gear, Vector3(0, -0.55, 0))
 		if side2 < 0: _arm_l = sh
 		else: _arm_r = sh
+
+
+func _mk_mat(color: Color, rough: float, metal: float = 0.0) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_color = color
+	m.roughness = rough
+	m.metallic = metal
+	return m
+
+
+func _add_mesh(parent: Node, mesh: Mesh, mat: Material, pos: Vector3,
+		rot: Vector3 = Vector3.ZERO, scl: Vector3 = Vector3.ONE) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	mi.mesh = mesh
+	mi.material_override = mat
+	mi.position = pos
+	mi.rotation = rot
+	mi.scale = scl
+	parent.add_child(mi)
+	return mi
+
+
+# ================================================================ 生成 / 死亡
 
 func spawn_at(pos: Vector3, yaw: float) -> void:
 	alive = true
@@ -415,13 +439,25 @@ func _compute_move_state() -> int:
 
 
 # ---------------------------------------------------------------- 视角
-func _update_look(delta: float) -> void:
+func _update_look(_delta: float) -> void:
 	if intent.look_delta != Vector2.ZERO:
+		# 本地玩家的灵敏度属于客户端设置；服务器端远端角色使用固定基准，
+		# 避免把服务器玩家的设置错误地套到所有网络客户端身上。
+		var look_sens: float = GameConfig.ADS_SENS_MULT
+		var invert_y: bool = false
+		if is_local:
+			look_sens = clampf(float(GameManager.get_setting("ads_sensitivity_mult", GameConfig.ADS_SENS_MULT)), 0.1, 1.5)
+			invert_y = bool(GameManager.get_setting("invert_y", false))
 		var sens: float = GameConfig.MOUSE_SENS_BASE * mouse_sensitivity
 		if weapon_system != null and weapon_system.call("is_aiming"):
-			sens *= GameConfig.ADS_SENS_MULT
+			sens *= look_sens
+			# 倍镜补偿: 沿用同一条开镜灵敏度路径(不另起一套), 按光学倍率线性压低
+			# 转动速度 —— 放大越多, 灵敏度越低。非倍镜武器该系数恒为 1.0,
+			# 既有机瞄手感完全不变。
+			sens *= float(weapon_system.call("get_scope_sens_scale"))
 		base_yaw -= intent.look_delta.x * sens
-		base_pitch -= intent.look_delta.y * sens
+		var pitch_input: float = -intent.look_delta.y if invert_y else intent.look_delta.y
+		base_pitch -= pitch_input * sens
 		var limit: float = deg_to_rad(GameConfig.MAX_PITCH)
 		base_pitch = clampf(base_pitch, -limit, limit)
 
@@ -743,16 +779,14 @@ func set_team(new_team: int) -> void:
 
 
 func _update_team_colors() -> void:
-	if _model_root == null:
+	if _mat_cloth == null:
 		return
-	var c: Color = GameConfig.TEAM_COLOR.get(team, Color.WHITE).darkened(0.25)
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = c
-	mat.roughness = 0.75
-	for child in _model_root.get_children():
-		var mi := child as MeshInstance3D
-		if mi != null:
-			mi.material_override = mat
+	var base: Color = GameConfig.TEAM_COLOR.get(team, Color.WHITE)
+	_mat_cloth.albedo_color = base.darkened(0.28)
+	_mat_armor.albedo_color = base.darkened(0.52)
+	_mat_helmet.albedo_color = base.darkened(0.42)
+	if _mat_pants != null:
+		_mat_pants.albedo_color = base.darkened(0.62)
 
 
 ## 供武器系统查询当前精度惩罚因子

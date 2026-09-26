@@ -1,7 +1,8 @@
 {
   "_meta": {
     "version": 1,
-    "note": "PROJECT STRIKE 投掷物数据表。距离=米, 时间=秒, 伤害=HP"
+    "note": "PROJECT STRIKE 投掷物数据表。距离=米, 时间=秒, 伤害=HP",
+    "max_safe_damage_format": "投掷者自伤上限(HP)。声明后爆炸对投掷者本人的伤害不超过该值; 队友/敌人的伤害不受影响。未声明(或<=0)的投掷物保持全额自伤。"
   },
 
   "he": {
@@ -52,5 +53,18 @@
     "spread_time": 1.2, "afterburn_duration": 2.0, "afterburn_dps": 8.0,
     "armor_penetration": 0.35,
     "color": "#ff7326"
+  },
+
+  "impact": {
+    "id": "impact", "display_name": "Impact Frag", "kind": "impact",
+    "price": 250, "max_carry": 2,
+    "fuse_time": 0.25,
+    "throw_velocity": 18.0, "throw_up_bias": 2.2,
+    "mass": 0.45, "bounce": 0.05, "friction": 0.7, "gravity_scale": 1.0,
+    "damage": 72, "damage_radius": 3.2, "falloff": "linear",
+    "armor_penetration": 0.45,
+    "impulse": 5.5,
+    "max_safe_damage": 28,
+    "color": "#c0c8d0"
   }
 }
