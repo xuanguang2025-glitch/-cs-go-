@@ -1,8 +1,15 @@
 #Requires -Version 5.1
 [CmdletBinding()]
-param([string]$Version = "1.0.0.0")
+param([string]$Version = "")
 
 $ErrorActionPreference = "Stop"
+# 版本号真源是根目录 VERSION 文件；仅当命令行显式传 -Version 时覆盖。
+if (-not $PSBoundParameters.ContainsKey("Version") -or [string]::IsNullOrWhiteSpace($Version)) {
+    $VersionFile = Join-Path $PSScriptRoot "VERSION"
+    if (Test-Path -LiteralPath $VersionFile) {
+        $Version = ([System.IO.File]::ReadAllText($VersionFile)).Trim()
+    }
+}
 if ([string]::IsNullOrWhiteSpace($Version)) { $Version = "1.0.0.0" }
 Set-Location -LiteralPath $PSScriptRoot
 
@@ -113,6 +120,7 @@ if ($Rcedit -and $overlaySaved) {
         "--set-version-string", "CompanyName", "PROJECT STRIKE",
         "--set-version-string", "ProductName", "PROJECT STRIKE",
         "--set-version-string", "FileDescription", "PROJECT STRIKE - 5v5 Tactical FPS",
+        "--set-version-string", "OriginalFilename", "PROJECT_STRIKE.exe",
         "--set-version-string", "LegalCopyright", "Copyright (c) 2026 PROJECT STRIKE")
     if (Test-Path -LiteralPath $Icon) { $resourceArgs += @("--set-icon", $Icon) }
     $resource = Invoke-Captured $Rcedit $resourceArgs

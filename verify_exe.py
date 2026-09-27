@@ -59,6 +59,9 @@ def main():
 
     # --- 2. 版本信息 ---
     print("\n[版本信息]")
+    # 期望版本取自根目录 VERSION（与 build_release.ps1 同源，避免校验脚本自身过期）
+    with open(os.path.join(HERE, "VERSION"), encoding="utf-8") as f:
+        version = f.read().strip()
     # VS_VERSION_INFO 里的字符串以 UTF-16LE 存放
     checks = {
         "CompanyName": "PROJECT STRIKE",
@@ -66,8 +69,8 @@ def main():
         "ProductName": "PROJECT STRIKE",
         "LegalCopyright": "Copyright (c) 2026 PROJECT STRIKE",
         "OriginalFilename": "PROJECT_STRIKE.exe",
-        "FileVersion": "1.1.0.0",
-        "ProductVersion": "1.1.0.0",
+        "FileVersion": version,
+        "ProductVersion": version,
     }
     vhit = 0
     for key, val in checks.items():
