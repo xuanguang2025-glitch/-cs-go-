@@ -1,0 +1,47 @@
+[
+	{
+		"entry_id": "store_featured_falcon_crimson",
+		"type": "direct_purchase",
+		"item_id": "ws_falcon_crimson_tide",
+		"cost_credits": 1500,
+		"cost_premium": 300,
+		"is_featured": true,
+		"rotation_tag": "weekly"
+	},
+	{
+		"entry_id": "store_featured_shadow_op",
+		"type": "direct_purchase",
+		"item_id": "cs_operator_shadow",
+		"cost_credits": 2000,
+		"cost_premium": 500,
+		"is_featured": true,
+		"rotation_tag": "weekly"
+	},
+	{
+		"entry_id": "store_standard_beret",
+		"type": "direct_purchase",
+		"item_id": "acc_beret_red",
+		"cost_credits": 400,
+		"cost_premium": 80,
+		"is_featured": false,
+		"rotation_tag": ""
+	},
+	{
+		"entry_id": "store_standard_goggles",
+		"type": "direct_purchase",
+		"item_id": "acc_tactical_goggles",
+		"cost_credits": 200,
+		"cost_premium": 40,
+		"is_featured": false,
+		"rotation_tag": ""
+	},
+	{
+		"entry_id": "store_voice_tactical",
+		"type": "direct_purchase",
+		"item_id": "fx_voice_tactical",
+		"cost_credits": 600,
+		"cost_premium": 120,
+		"is_featured": false,
+		"rotation_tag": ""
+	}
+]

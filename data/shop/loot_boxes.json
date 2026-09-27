@@ -1,0 +1,53 @@
+[
+	{
+		"id": "lb_standard_case",
+		"name": "Standard Supply Case",
+		"type": "loot_box",
+		"rarity": "common",
+		"cost_credits": 300,
+		"cost_premium": 0,
+		"guaranteed_rarity_min": "common",
+		"pity_counter_threshold": 10,
+		"pity_guaranteed_rarity": "epic",
+		"contents_pool": [
+			{ "item_id": "ws_falcon_crimson_tide",   "weight": 5.0 },
+			{ "item_id": "ws_ar17_arctic_digital",   "weight": 12.0 },
+			{ "item_id": "ws_longshot_golden_age",   "weight": 1.0 },
+			{ "item_id": "ws_vega_neon_viper",       "weight": 5.0 },
+			{ "item_id": "ws_m7_faded_zebra",        "weight": 20.0 },
+			{ "item_id": "cs_operator_shadow",       "weight": 1.0 },
+			{ "item_id": "cs_desert_ranger",         "weight": 8.0 },
+			{ "item_id": "acc_beret_red",            "weight": 15.0 },
+			{ "item_id": "acc_tactical_goggles",     "weight": 20.0 },
+			{ "item_id": "fx_kill_lightning",        "weight": 3.0 },
+			{ "item_id": "fx_voice_tactical",        "weight": 10.0 }
+		],
+		"preview_items": ["ws_falcon_crimson_tide", "cs_operator_shadow"],
+		"steam_item_def_id": 50001,
+		"open_animation": ""
+	},
+	{
+		"id": "lb_premium_crate",
+		"name": "Premium Crate",
+		"type": "loot_box",
+		"rarity": "rare",
+		"cost_credits": 0,
+		"cost_premium": 250,
+		"guaranteed_rarity_min": "rare",
+		"pity_counter_threshold": 5,
+		"pity_guaranteed_rarity": "legendary",
+		"contents_pool": [
+			{ "item_id": "ws_falcon_crimson_tide",   "weight": 15.0 },
+			{ "item_id": "ws_longshot_golden_age",   "weight": 5.0 },
+			{ "item_id": "ws_vega_neon_viper",       "weight": 15.0 },
+			{ "item_id": "cs_operator_shadow",       "weight": 5.0 },
+			{ "item_id": "cs_urban_enforcer",        "weight": 10.0 },
+			{ "item_id": "acc_dog_tags_gold",        "weight": 10.0 },
+			{ "item_id": "fx_kill_lightning",        "weight": 10.0 },
+			{ "item_id": "fx_mvp_knife_spin",        "weight": 8.0 }
+		],
+		"preview_items": ["ws_longshot_golden_age", "cs_operator_shadow"],
+		"steam_item_def_id": 50002,
+		"open_animation": ""
+	}
+]

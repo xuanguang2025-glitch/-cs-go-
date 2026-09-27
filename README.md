@@ -15,7 +15,7 @@ PROJECT STRIKE 是一款由**个人开发者 + AI 全流程协作开发**的战�
 ## 为什么值得一看
 
 1. **AI 全流程开发** —— 从架构设计、网络同步、战斗数值到构建发布脚本，整个项目由一个人与 AI 协作完成，全部过程可追溯（见 `docs/` 下的开发记录）。
-2. **零第三方资产** —— 四张地图、19 把武器的模型、角色肢体动画、音效、图标全部代码生成，克隆仓库即拥有全部"美术"。
+2. **零第三方资产** —— 四张地图、22 把武器的模型、角色肢体动画、音效、图标全部代码生成，克隆仓库即拥有全部"美术"。
 3. **服务器权威架构** —— 联机对战中伤害、命中、经济、回合推进全部在服务端判定，客户端只上报输入意图，从架构层面杜绝"改客户端就能作弊"。
 4. **完整的竞技循环** —— 经济系统、购买菜单、Elo 段位、比赛录像回放、观战、反作弊校验一应俱全。
 
@@ -26,8 +26,8 @@ PROJECT STRIKE 是一款由**个人开发者 + AI 全流程协作开发**的战�
 | 系统 | 内容 |
 |---|---|
 | 玩法 | 5v5 爆破模式：安装 6s → 倒计时 40s → 拆除 7s（拆弹器 4s）；第 13 回合半场交换攻防，12:12 进加时 |
-| 武器 | **19 把**：手枪 4 / 冲锋枪 3 / 步枪 4 / 狙击 3 / 霰弹 2 / 轻机枪 2 / 近战 1，全部数据驱动 |
-| 投掷物 | 高爆 / 闪光 / 烟雾（体积烟雾参与真实视线遮挡）/ 燃烧 |
+| 武器 | **22 把**：手枪 4 / 冲锋枪 4 / 步枪 5 / 狙击 4 / 霰弹 2 / 轻机枪 2 / 近战 1，全部数据驱动 |
+| 投掷物 | 高爆 / 闪光 / 烟雾（体积烟雾参与真实视线遮挡）/ 燃烧 / 撞击引爆 |
 | 地图 | 3 张竞技图 + 1 训练场，全部程序化生成 |
 | 网络 | ENet 服务器权威 + 客户端预测 + 命中回溯（Lag Compensation）+ 断线重连 |
 | 反作弊 | 服务器端移动速度 / 射速校验，客户端伤害上报直接拒绝 |
@@ -132,11 +132,18 @@ PROJECT_STRIKE/
 ├── open_editor.bat         打开 Godot 编辑器
 ├── build_release.bat       一键构建发布版 exe（含图标 / 版本注入）
 ├── data/
-│   ├── weapons.json        19 把武器全部平衡数据
-│   └── grenades.json       4 种投掷物数据
-├── scripts/                45+ 个 GDScript
+│   ├── weapons.json        22 把武器全部平衡数据
+│   ├── grenades.json       5 种投掷物数据
+│   ├── rarity_tiers.json   稀有度四档（颜色 / 掉落权重）
+│   ├── skins/              武器皮肤 / 角色皮肤 / 配件 / 特效外观定义
+│   └── shop/               货币配置 / 补给箱 / 商城目录
+├── scripts/                65 个 GDScript
 │   ├── Core/               GameManager / EventBus / MatchManager / NetworkManager
 │   │                       RankSystem / ReplaySystem / AntiCheat / SteamManager
+│   ├── Shop/               SkinDatabase / InventoryService / CurrencyManager /
+│   │                       ShopManager / ShopProfile / LootBoxResolver /
+│   │                       LoadoutCosmetics / 库存后端(IInventoryBackend +
+│   │                       Local / Steam 两种实现)
 │   ├── Player/             Actor / ActorIntent / PlayerController / RemoteController
 │   ├── Weapons/            WeaponSystem（射击 / 后坐力 / 扩散）/ WeaponViewModel
 │   ├── Combat/             HitSystem（命中 / 穿透）/ FXManager（对象池）
@@ -144,8 +151,8 @@ PROJECT_STRIKE/
 │   ├── Maps/               MapBuilder（四张图程序化生成 + 导航图）
 │   ├── Network/            LagComp（服务器位置历史回溯）
 │   ├── Audio/              AudioForge（PCM 合成）/ SoundManager（3D 播放）
-│   └── UI/                 HUD / BuyMenu / MainMenu / Scoreboard / MatchResult ...
-├── scenes/                 Main / Game / MainMenu / ReplayViewer / Dev 探针场景
+│   └── UI/                 HUD / BuyMenu / MainMenu / ShopUI / Scoreboard / MatchResult ...
+├── scenes/                 Main / Game / MainMenu / ReplayViewer / UI / Dev 探针场景
 ├── docs/                   开发文档（DEVELOPMENT_NOTES.md / CORE_LOOP_REBALANCE.md）
 └── RELEASE.md             发布手册（构建链路 / Steam 接入 / 发布检查清单）
 ```
@@ -154,14 +161,23 @@ PROJECT_STRIKE/
 
 ## 开发状态
 
-当前基线 **v1.2.0.16** + 持续迭代（近期落地：射击手感再平衡、屏幕目标标识、程序化人物重做、A1 画质升级）。游戏已完整可玩，仍在开发完善阶段。
+当前基线 **v1.3.0.0**（版本号唯一真源是根目录 `VERSION` 文件，`build_release.ps1` 与 `verify_exe.py` 都从它读取）+ 持续迭代。近期落地：商城与皮肤系统、射击手感再平衡、屏幕目标标识、程序化人物重做、A1 画质升级。游戏已完整可玩，仍在开发完善阶段。
 
-**已实现**：5v5 完整对局 / 19 武器 / 4 地图 / 局域网与专用服务器 / 段位与录像 / 反作弊 / Steam 集成
+**已实现**：5v5 完整对局 / 22 武器 / 4 地图 / 局域网与专用服务器 / 段位与录像 / 反作弊 / Steam 集成 / 商城与皮肤（纯视觉）
+
+**商城与皮肤要点**：
+
+- 四档稀有度、三类皮肤槽位（武器 / 角色 / 击杀特效 / MVP / 语音）、补给箱开箱与保底
+- 双轨货币：对局赚取的技能点 + 充值获得的钻石；重复外观自动折算积分
+- **皮肤只改材质与模型，不参与任何命中或伤害判定**
+- 库存 / 余额 / 保底计数按玩家分档（`ShopProfile`），联机时由服务器权威结算，
+  客户端只发意图、等回执，无法自行发货
+- 外观随角色生成同步给其他玩家，纯本地可见
 
 **计划中**：
 
 - 跨网匹配服务器与账号系统（当前为接口对齐的本地匹配）
-- 商城与皮肤（纯视觉，不影响平衡）
+- Steam 商品目录与真实充值（引擎侧适配器已就位，需真实 AppID + 后端发货服务才能验证）
 
 **刻意不做**：第三方美术资源与骨骼动画（保持零外部依赖的项目特色）
 

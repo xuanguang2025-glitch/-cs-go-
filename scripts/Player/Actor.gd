@@ -78,6 +78,11 @@ var _collision: CollisionShape3D
 var _capsule: CapsuleShape3D
 var _model_root: Node3D          # 第三人称模型
 var _held_weapon: Node3D = null  # 第三人称持枪模型(远端角色可见)
+## 身体网格单独记账: _model_root 下还挂着持枪模型,
+## 整体遍历上皮肤会把枪也一起染成衣服的颜色。
+var _body_meshes: Array = []
+var _cosmetics: Dictionary = {}
+var _held_weapon_id: String = ""
 
 # 队伍配色材质(换边时只需改这几张, 不必遍历节点重建)
 var _mat_cloth: StandardMaterial3D = null
@@ -310,7 +315,35 @@ func _add_mesh(parent: Node, mesh: Mesh, mat: Material, pos: Vector3,
 	mi.rotation = rot
 	mi.scale = scl
 	parent.add_child(mi)
+	if parent == _model_root:
+		_body_meshes.append(mi)
 	return mi
+
+
+## 应用某玩家的外观快照(服务器生成时下发, 或换装时广播)。
+## 纯视觉: 不改命中盒、不改数值, 快照里认不出的条目一律忽略。
+func apply_cosmetics(equipped: Dictionary) -> void:
+	_cosmetics = equipped.duplicate(true)
+	_tint_body()
+	# 持枪模型可能在收到快照前就已建好, 这里补一次
+	if _held_weapon != null and _held_weapon_id != "":
+		_tint_held_weapon()
+
+
+## 身体皮肤: 只染 _body_meshes, 不含挂在同一父节点下的枪
+func _tint_body() -> void:
+	var cid := String(_cosmetics.get(LoadoutCosmetics.SLOT_CHARACTER, ""))
+	if cid.is_empty():
+		return
+	LoadoutCosmetics.apply_tint_to_meshes(_body_meshes, cid)
+
+
+func _tint_held_weapon() -> void:
+	if _held_weapon == null or _held_weapon_id.is_empty():
+		return
+	var sid := String(_cosmetics.get(
+		LoadoutCosmetics.weapon_slot(_held_weapon_id), ""))
+	LoadoutCosmetics.apply_to_node(_held_weapon, sid)
 
 
 # ================================================================ 生成 / 死亡
@@ -755,6 +788,7 @@ func _on_held_weapon_changed(slot: String, wid: String) -> void:
 	if _held_weapon != null:
 		_held_weapon.queue_free()
 		_held_weapon = null
+		_held_weapon_id = ""
 	if wid == "":
 		return
 	var kind: String = str(WeaponDatabase.get_weapon(wid).get("viewmodel", "rifle"))
@@ -765,6 +799,8 @@ func _on_held_weapon_changed(slot: String, wid: String) -> void:
 	_held_weapon.position = Vector3(0.18, 1.28, -0.22)
 	_held_weapon.rotation.y = deg_to_rad(-5)
 	_model_root.add_child(_held_weapon)
+	_held_weapon_id = wid
+	_tint_held_weapon()
 
 
 ## 半场交换攻守时调用

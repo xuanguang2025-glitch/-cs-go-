@@ -1,0 +1,56 @@
+[
+	{
+		"id": "fx_kill_lightning",
+		"name": "Lightning Strike",
+		"type": "kill_effect",
+		"rarity": "epic",
+		"particle_scene": "",
+		"sound": "",
+		"description": "Victim is struck by lightning on death.",
+		"steam_item_def_id": 40001,
+		"tags": ["electric"]
+	},
+	{
+		"id": "fx_kill_blood_mist",
+		"name": "Blood Mist",
+		"type": "kill_effect",
+		"rarity": "rare",
+		"particle_scene": "",
+		"sound": "",
+		"description": "Red mist dissipates from the elimination point.",
+		"steam_item_def_id": 40002,
+		"tags": ["blood"]
+	},
+	{
+		"id": "fx_mvp_salute",
+		"name": "Military Salute",
+		"type": "mvp_animation",
+		"rarity": "rare",
+		"animation_resource": "",
+		"duration_sec": 4.0,
+		"description": "MVP performs a crisp salute.",
+		"steam_item_def_id": 40101,
+		"tags": ["mvp"]
+	},
+	{
+		"id": "fx_mvp_knife_spin",
+		"name": "Knife Spin",
+		"type": "mvp_animation",
+		"rarity": "epic",
+		"animation_resource": "",
+		"duration_sec": 3.5,
+		"description": "MVP spins a combat knife between fingers.",
+		"steam_item_def_id": 40102,
+		"tags": ["mvp", "knife"]
+	},
+	{
+		"id": "fx_voice_tactical",
+		"name": "Tactical Voice Pack",
+		"type": "voice_pack",
+		"rarity": "common",
+		"audio_map": {},
+		"description": "Professional tactical radio chatter.",
+		"steam_item_def_id": 40201,
+		"tags": ["voice"]
+	}
+]

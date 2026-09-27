@@ -1,0 +1,46 @@
+[
+	{
+		"id": "acc_beret_red",
+		"name": "Red Beret",
+		"type": "accessory",
+		"attach_bone": "head_attach",
+		"rarity": "rare",
+		"mesh": "",
+		"description": "Classic airborne headwear.",
+		"steam_item_def_id": 30001,
+		"tags": ["head", "military"]
+	},
+	{
+		"id": "acc_tactical_goggles",
+		"name": "Tactical Goggles",
+		"type": "accessory",
+		"attach_bone": "head_attach",
+		"rarity": "common",
+		"mesh": "",
+		"description": "Standard-issue night vision mount goggles.",
+		"steam_item_def_id": 30002,
+		"tags": ["head", "nv"]
+	},
+	{
+		"id": "acc_dog_tags_gold",
+		"name": "Gold Dog Tags",
+		"type": "accessory",
+		"attach_bone": "chest_attach",
+		"rarity": "epic",
+		"mesh": "",
+		"description": "Engraved gold-plated identification tags.",
+		"steam_item_def_id": 30003,
+		"tags": ["chest", "gold"]
+	},
+	{
+		"id": "acc_spray_stripe_logo",
+		"name": "STRIKE Logo Spray",
+		"type": "spray",
+		"attach_bone": "",
+		"rarity": "common",
+		"mesh": "",
+		"description": "Official PROJECT STRIKE logo spray paint.",
+		"steam_item_def_id": 30004,
+		"tags": ["spray"]
+	}
+]

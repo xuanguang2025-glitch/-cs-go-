@@ -1,0 +1,47 @@
+[
+	{
+		"id": "cs_operator_shadow",
+		"name": "Shadow Operator",
+		"type": "character_skin",
+		"character_slot": "operator_01",
+		"rarity": "legendary",
+		"mesh_override": "",
+		"texture_override": "",
+		"material_params": {},
+		"tint": [0.14, 0.15, 0.18],
+		"first_person_arm_mesh": "",
+		"description": "Stealth-optimized operative suit.",
+		"steam_item_def_id": 20001,
+		"tags": ["stealth", "dark"]
+	},
+	{
+		"id": "cs_desert_ranger",
+		"name": "Desert Ranger",
+		"type": "character_skin",
+		"character_slot": "operator_02",
+		"rarity": "rare",
+		"mesh_override": "",
+		"texture_override": "",
+		"material_params": {},
+		"tint": [0.66, 0.55, 0.36],
+		"first_person_arm_mesh": "",
+		"description": "Sand-colored tactical gear with desert camo.",
+		"steam_item_def_id": 20002,
+		"tags": ["desert", "camo"]
+	},
+	{
+		"id": "cs_urban_enforcer",
+		"name": "Urban Enforcer",
+		"type": "character_skin",
+		"character_slot": "operator_03",
+		"rarity": "epic",
+		"mesh_override": "",
+		"texture_override": "",
+		"material_params": {},
+		"tint": [0.24, 0.28, 0.32],
+		"first_person_arm_mesh": "",
+		"description": "Heavy urban combat armor with riot shield mount.",
+		"steam_item_def_id": 20003,
+		"tags": ["heavy", "urban"]
+	}
+]

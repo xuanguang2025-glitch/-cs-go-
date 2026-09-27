@@ -249,6 +249,9 @@ func _submit_intent(move: Vector2, look: Vector2, buttons: int,
 func broadcast_spawn(net_id: int, display_name: String, team: int, home: Vector3) -> void:
 	for p in _active_peers():
 		_do_spawn.rpc_id(p, net_id, display_name, team, home)
+	# 紧跟一发改装快照: 只推"角色已创建"是不够的 —— 晚进来的人会看到
+	# 一个裸模型, 直到那个人下次换装才补上颜色。
+	broadcast_cosmetics(net_id)
 
 
 ## 活跃 peer 列表(只含 SceneMultiplayer 认可的 peer)。
@@ -470,6 +473,117 @@ func _request_purchase(kind: String, payload: String) -> void:
 	if a == null or not is_instance_valid(a):
 		return
 	mm.call("apply_network_purchase", a, kind, payload)
+
+
+# ================================================================ 商城(服务器权威)
+## 商城的库存/余额/保底是跨局持久资产, 绝不能由客户端自己改:
+## 客户端改本地文件等于凭空造皮肤, 服务器代摇箱子才是要钱的那一步。
+##
+## 一次业务请求 = 一个上行 RPC + 一个定向下行回执。
+## 上行只带"要做什么", 身份一律用 get_remote_sender_id() 反查,
+## 客户端在参数里自称"我是 7001"没有任何意义。
+
+## 服务器回执到达本机(仅本机玩家的业务会被转发到别处)
+signal shop_response(action: String, result: Dictionary)
+
+## 外观同步到达(远端玩家换装)
+signal cosmetics_received(net_id: int, equipped: Dictionary)
+
+
+func is_online_client() -> bool:
+	return is_client and not is_server
+
+
+## 客户端: 把商城业务转给服务器。action ∈ purchase/unbox/equip/unequip/balance
+func request_shop(action: String, args: Array = []) -> void:
+	if not is_online_client():
+		# 单人/主机模式下不该走这条路, 直接调用会静默无人应答, 所以显式拒绝
+		push_warning("[NetworkManager] request_shop(%s) 在非客户端态被调用" % action)
+		return
+	if not active:
+		# 会话没建立就 rpc_id(1) 是往空管道里发包
+		push_warning("[NetworkManager] request_shop(%s) 在无会话状态下被调用" % action)
+		return
+	_shop_request.rpc_id(1, action, args)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _shop_request(action: String, args: Array) -> void:
+	# 只有服务器该结算。客户端收到别人的 _shop_request 必须什么都不做,
+	# 否则伪造一条就能让别的客户端给自己发货。
+	if not is_server:
+		return
+	var sender: int = multiplayer.get_remote_sender_id()
+	if sender == 0:
+		return
+	var result := server_shop_action(action, sender, args)
+	_shop_reply.rpc_id(sender, action, result)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _shop_reply(action: String, result: Dictionary) -> void:
+	if multiplayer.get_unique_id() == 1:
+		return
+	shop_response.emit(action, result)
+
+
+## 服务器: 以 peer_id 的身份执行商城业务。ShopUI 与 RPC 层共用这一个入口。
+func server_shop_action(action: String, peer_id: int, args: Array) -> Dictionary:
+	match action:
+		"purchase":
+			if args.size() < 2:
+				return {"success": false, "reason": "bad_args"}
+			return ShopManager.server_purchase(peer_id, String(args[0]), String(args[1]))
+		"unbox":
+			if args.size() < 1:
+				return {"success": false, "reason": "bad_args"}
+			return ShopManager.server_unbox(peer_id, String(args[0]))
+		"equip":
+			if args.size() < 2:
+				return {"success": false, "reason": "bad_args"}
+			var r := ShopManager.server_equip(peer_id, String(args[0]), String(args[1]))
+			if bool(r.get("success", false)):
+				broadcast_cosmetics(peer_id)
+			return r
+		"unequip":
+			if args.size() < 1:
+				return {"success": false, "reason": "bad_args"}
+			var r2 := ShopManager.server_unequip(peer_id, String(args[0]))
+			if bool(r2.get("success", false)):
+				broadcast_cosmetics(peer_id)
+			return r2
+		"balance":
+			var p := ShopManager.profile_for(peer_id)
+			if p == null:
+				return {"success": false, "reason": "no_profile"}
+			return {"success": true, "credits": p.balance(ShopProfile.CREDITS),
+				"premium": p.balance(ShopProfile.PREMIUM),
+				"owned": p.owned_ids(), "equipped": p.loadout.for_network()}
+	return {"success": false, "reason": "unknown_action:%s" % action}
+
+
+# ================================================================ 外观同步
+## 外观纯视觉, 不进快照也不参与命中判定; 只在生成时和换装时各推一次。
+
+func broadcast_cosmetics(net_id: int) -> void:
+	if not is_server:
+		return
+	var data: Dictionary = ShopManager.cosmetic_snapshot_for(net_id)
+	# 本侧先应用: 主机自己的角色不走 RPC, 只发给 peers 会永远是裸模型
+	var own: Actor = net_actors.get(net_id)
+	if own != null and is_instance_valid(own):
+		own.call("apply_cosmetics", data)
+	for p in _active_peers():
+		_receive_cosmetics.rpc_id(p, net_id, data)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _receive_cosmetics(net_id: int, equipped: Dictionary) -> void:
+	cosmetics_received.emit(net_id, equipped)
+	var a: Actor = net_actors.get(net_id)
+	if a == null or not is_instance_valid(a):
+		return
+	a.call("apply_cosmetics", equipped)
 
 
 # ================================================================ 反作弊钩子

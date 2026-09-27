@@ -1,0 +1,6 @@
+{
+	"common":    { "id": 0, "label": "Common",    "color": "#B0B0B0", "drop_weight": 60.0 },
+	"rare":      { "id": 1, "label": "Rare",      "color": "#4B69FF", "drop_weight": 25.0 },
+	"epic":      { "id": 2, "label": "Epic",       "color": "#8847FF", "drop_weight": 12.0 },
+	"legendary": { "id": 3, "label": "Legendary", "color": "#FFA500", "drop_weight": 3.0 }
+}

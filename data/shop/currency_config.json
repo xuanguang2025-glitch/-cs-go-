@@ -1,0 +1,23 @@
+{
+	"credits": {
+		"display_name": "Strike Credits",
+		"earn_sources": ["match_reward", "daily_login", "weekly_challenge"],
+		"exchange_rate_to_usd_cents": null
+	},
+	"repeat_refund_credits": {
+		"_note": "重复外观折算额(积分)。不变量: 必须严格低于最便宜积分箱的价格, 否则'开到自己已有的高价档'会变成净赚, 玩家能无限刷积分。ShopProbe 有断言把这条钉住。",
+		"common": 40,
+		"rare": 80,
+		"epic": 140,
+		"legendary": 250
+	},
+	"premium_currency": {
+		"display_name": "Strike Coins",
+		"source": "steam_microtransaction",
+		"bundles": [
+			{ "coins": 500,  "price_usd_cents": 499,  "steam_sku_id": "sku_coins_500" },
+			{ "coins": 1100, "price_usd_cents": 999,  "steam_sku_id": "sku_coins_1100" },
+			{ "coins": 2500, "price_usd_cents": 1999, "steam_sku_id": "sku_coins_2500" }
+		]
+	}
+}

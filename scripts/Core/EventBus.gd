@@ -54,6 +54,19 @@ signal announcement(text: String, kind: String)
 signal buy_menu_toggled(open: bool)
 signal spectate_target_changed(target: Node)
 
+# ---- 商城 / 外观
+## 注意: 这里的 currency_changed 指商城货币(积分/钻石),
+## 与上面 money_changed(回合内购买力)是两套完全不同的经济。
+signal currency_changed(currency_type: String, new_balance: int)
+signal shop_opened
+signal shop_closed
+signal inventory_updated(owned_ids: Array)
+signal cosmetic_equipped(slot: String, item_id: String)
+signal cosmetic_unequipped(slot: String)
+signal loot_box_opened(box_id: String, result_item_id: String)
+signal shop_purchase_completed(item_id: String, success: bool, reason: String)
+signal shop_preview_requested(item_id: String)
+
 # ---- 系统
 signal graphics_changed(tier: int)
 signal game_start_requested(map_id: String, bot_count: int)

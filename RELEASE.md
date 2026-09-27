@@ -171,6 +171,18 @@ build/
 > **构建产物必须真的跑一次才算数。** 本次就是靠 `smoke_test.py` 才抓出
 > rcedit 抹掉内嵌 PCK 的问题——在那之前图标 6/6、版本号回读全部"通过"。
 
+> ⚠ **跑完 `smoke_test.py` 必须先结束进程再构建。**
+> 它默认"结束后保留进程"，而 Windows 不允许删除正在运行的 exe，
+> 于是下一次 `build_release.ps1` 会在第一步 `[2/5] 导出` 前抛
+> `Access to the path ... is denied` 并中止。
+> 如果构建命令是 `... | tail` 这类管道收尾，**管道退出码会盖掉真正的失败**，
+> 看起来"构建成功"，实际 `build/PROJECT_STRIKE.exe` 还是上一次的旧文件——
+> 里面是所有改动之前的配置。2026-09-27 就这么差点把一个含**错误折算表**的包当成
+> 已验证产物发布出去（旧值让玩家可以无限刷积分）。
+>
+> 收尾二选一：`taskkill /F /IM PROJECT_STRIKE.exe`，或构建前先确认没有该进程。
+> 另外别只信退出码——抽查包里是否真有新内容的特征字符串。
+
 存档位置：`%APPDATA%\Godot\app_userdata\PROJECT STRIKE\`
 （`settings.cfg` / `rank.json` / `replays/`）
 
@@ -269,11 +281,29 @@ Export 面板复制预设 → 平台选 Linux → 勾选 *Export as dedicated se
 - [x] 战斗系统定向测试 —— `CombatProbe.tscn`
 - [x] 装置全流程 —— `PlantProbe.tscn`
 - [x] 网络快照同步 —— `NetProbe.tscn`
+- [x] 商城系统 —— `ShopProbe.tscn`（117 断言：数据完整性 / 折算经济闭环 /
+      开箱概率与保底 / 多玩家 profile 隔离 / RPC 伪造防护 / Steam 适配器降级）
+- [x] 商城界面接线 —— `UIProbe.tscn`（47 断言：页签 / 筛选 / 3D 预览 /
+      按钮真的驱动结算 / 主菜单入口）
 - [x] Windows exe 导出并可运行（Steam 连接、图标 6/6、版本信息回读校验）
 - [x] 图标 / 版本信息注入
 - [x] **内嵌 PCK 完整性**（`overlay_tool.py check`，rcedit 之后必须过）
-- [x] **发布版 exe 实跑冒烟**（`smoke_test.py`：Vulkan Forward+ 起来、19 把武器加载、无报错）
+- [x] **商城 JSON 已进包**（构建产物里 grep 得到 `ws_falcon_crimson_tide` /
+      `repeat_refund_credits` / `lb_standard_case`，新目录 `data/skins|shop/` 未被漏掉）
+- [x] **发布版 exe 实跑冒烟**（`smoke_test.py`：Vulkan Forward+ 起来、22 把武器加载、
+      17 个外观条目 / 2 个开箱 / 5 个商城条目加载、无报错）
 - [x] 纯观察者专用服务器（两个客户端依次连入，两队各 1 人自动开赛）
+
+**上架前仍必须补做（当前环境无法验证，不要签掉）**：
+
+- [ ] **Steam 真实商品目录验证** —— `SteamInventoryAdapter` 只在无 Steam 环境下
+      验证过"正确地不接管后端、正确地拒绝发货"。拉取 / 消耗 / 回调时序需要
+      真实 AppID + Steamworks 后台商品配置，当前 AppID 480 是 Spacewar 占位值。
+- [ ] **充值发货后端** —— 客户端无 publisher 权限，无法授予 Steam 库存物品。
+      "钻石到账 → 发货"这条链路依赖一个尚不存在的自有后端服务。
+- [ ] **商城 UI 人工过一遍** —— 无头探针测的是接线，不是观感。配色、排版疏密、
+      3D 预览镜头与开箱揭示动画的实际表现必须开编辑器实跑确认。
+- [ ] 联机下真实走一遍商城（`NetProbe` 目前只覆盖角色与快照，未覆盖商城 RPC 往返）
 
 待人工确认：
 

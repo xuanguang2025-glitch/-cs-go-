@@ -40,6 +40,31 @@ var matchmaking_panel: PanelContainer = null
 var matchmaking_label: Label = null
 var _matchmaking_timer: float = 0.0
 var _matchmaking_pending: bool = false
+var _shop_ui: ShopUI = null
+var _shop_button: Button = null
+
+
+func _shop_button_text() -> String:
+	return "商 城  ·  我的外观 (%d 件)" % InventoryService.get_owned_ids().size()
+
+
+## 商城界面懒加载: 主菜单启动时不必建整棵 UI 树, 首次点开才实例化。
+func _ensure_shop() -> ShopUI:
+	if _shop_ui != null and is_instance_valid(_shop_ui):
+		return _shop_ui
+	var scene: PackedScene = load("res://scenes/UI/ShopUI.tscn")
+	if scene == null:
+		push_error("[MainMenu] 无法加载 ShopUI.tscn")
+		return null
+	_shop_ui = scene.instantiate() as ShopUI
+	add_child(_shop_ui)
+	return _shop_ui
+
+
+func _open_shop() -> void:
+	var s := _ensure_shop()
+	if s != null:
+		s.open_shop()
 
 
 func _ready() -> void:
@@ -296,6 +321,19 @@ func _build_ui() -> void:
 			return
 		get_tree().change_scene_to_file("res://scenes/ReplayViewer.tscn"))
 	vbox.add_child(replay_btn)
+
+	# 商城 / 外观
+	var shop_btn := Button.new()
+	shop_btn.name = "ShopButton"
+	shop_btn.text = _shop_button_text()
+	shop_btn.custom_minimum_size = Vector2(0, 40)
+	shop_btn.add_theme_font_size_override("font_size", 17)
+	shop_btn.pressed.connect(_open_shop)
+	vbox.add_child(shop_btn)
+	_shop_button = shop_btn
+	EventBus.inventory_updated.connect(func(_ids: Array) -> void:
+		if _shop_button != null:
+			_shop_button.text = _shop_button_text())
 
 	# 按钮
 	var play_btn := Button.new()
